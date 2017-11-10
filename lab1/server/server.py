@@ -164,29 +164,18 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET_Index(self):
 		# We set the response status code to 200 (OK)
 		self.set_HTTP_headers(200)
-
-		#In practice, go over the entries list,
-		#produce the boardcontents part,
-		#then construct the full page by combining all the parts ...
-
-
-
-		header = board_frontpage_header_template
-		content = boardcontents_template
-		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
-		page =  header + content + footer
-
-		self.wfile.write(page)
+		self.make_Page()
 
 	def do_GET_Board(self):
 		self.set_HTTP_headers(200)
+		self.make_Page()
 
+	def make_Page(self):
 		entries = self.get_Entries()
 		header = board_frontpage_header_template
-		content = boardcontents_template %("test0",entries)
+		content = boardcontents_template %("Board Contents",entries)
 		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
 		page =  header + content + footer
-
 		self.wfile.write(page)
 
 	def get_Entries(self):
@@ -211,7 +200,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			index = data.find('&')
 			msg_id = int(self.path[7:])
 			if data[index:] == "&delete=0":
-				self.server.modify_value_in_store(msg_id,data[6:index-1])
+				self.server.modify_value_in_store(msg_id,data[6:index])
 			else:
 				self.server.delete_value_in_store(msg_id)
 
