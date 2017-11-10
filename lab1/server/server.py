@@ -24,7 +24,7 @@ entry_template = file("entry_template.html").read()
 
 #------------------------------------------------------------------------------------------------------
 # Static variables definitions
-PORT_NUMBER = 80
+PORT_NUMBER = 8040
 #------------------------------------------------------------------------------------------------------
 
 
@@ -49,8 +49,9 @@ class BlackboardServer(HTTPServer):
 	# We add a value received to the store
 	def add_value_to_store(self, value):
 		# We add the value to the store
-		self.store[self.current_key] = value
 		self.current_key += 1
+		self.store[self.current_key] = value
+
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
@@ -150,24 +151,46 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET(self):
 		print("Receiving a GET on path %s" % self.path)
 		# Here, we should check which path was requested and call the right logic based on it
-		self.do_GET_Index()
+		if self.path == "/":
+			self.do_GET_Index()
+		elif self.path == "/board":
+			self.do_GET_Board()
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
 	def do_GET_Index(self):
 		# We set the response status code to 200 (OK)
 		self.set_HTTP_headers(200)
-		# We should do some real HTML here
-		html_reponse = "<html><head><title>Basic Skeleton</title></head><body>This is the basic HTML content when receiving a GET</body></html>"
+
 		#In practice, go over the entries list,
 		#produce the boardcontents part,
 		#then construct the full page by combining all the parts ...
-		page = board_frontpage_header_template + boardcontents_template + board_frontpage_footer_template
+
+
+
+		header = board_frontpage_header_template
+		content = boardcontents_template
+		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
+		page =  header + content + footer
 
 		self.wfile.write(page)
-#------------------------------------------------------------------------------------------------------
-	# we might want some other functions
-#------------------------------------------------------------------------------------------------------
+
+	def do_GET_Board(self):
+		self.set_HTTP_headers(200)
+
+		entries = self.get_Entries()
+		header = board_frontpage_header_template
+		content = boardcontents_template %("test0",entries)
+		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
+		page =  header + content + footer
+
+		self.wfile.write(page)
+
+	def get_Entries(self):
+		entries = ""
+		for msg_id in sorted(self.server.store.keys()):
+			entries += entry_template % ("action",msg_id,self.server.store[msg_id])
+		return entries
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
@@ -176,6 +199,14 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# Here, we should check which path was requested and call the right logic based on it
 		# We should also parse the data received
 		# and set the headers for the client
+
+		length = self.headers["Content-Length"]
+		entry = self.rfile.read(int(length))[6:]
+		self.rfile.close()
+		print entry
+
+		if self.path == "/board":
+			self.do_POST_New_Entry(entry)
 
 		# If we want to retransmit what we received to the other vessels
 		retransmit = False # Like this, we will just create infinite loops!
@@ -194,7 +225,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
-
+	def do_POST_New_Entry(self,value):
+		self.server.add_value_to_store(value)
 
 
 
