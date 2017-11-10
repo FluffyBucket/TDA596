@@ -14,6 +14,7 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
+import re
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
@@ -57,12 +58,14 @@ class BlackboardServer(HTTPServer):
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
 		# we modify a value in the store if it exists
+		print "change: %d\t%s" % (key,value)
 		self.store[key] = value
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
 		# we delete a value in the store if it exists
+		print "delete: %d" % key
 		del self.store[key]
 		pass
 #------------------------------------------------------------------------------------------------------
@@ -189,7 +192,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def get_Entries(self):
 		entries = ""
 		for msg_id in sorted(self.server.store.keys()):
-			entries += entry_template % ("action",msg_id,self.server.store[msg_id])
+			entries += entry_template % ("board/%d"% msg_id,msg_id,self.server.store[msg_id])
 		return entries
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
@@ -199,14 +202,18 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# Here, we should check which path was requested and call the right logic based on it
 		# We should also parse the data received
 		# and set the headers for the client
-
 		length = self.headers["Content-Length"]
-		entry = self.rfile.read(int(length))[6:]
+		data = self.rfile.read(int(length))
 		self.rfile.close()
-		print entry
-
 		if self.path == "/board":
-			self.do_POST_New_Entry(entry)
+			self.do_POST_New_Entry(data[6:])
+		elif re.search(r'\d+',self.path):
+			index = data.find('&')
+			msg_id = int(self.path[7:])
+			if data[index:] == "&delete=0":
+				self.server.modify_value_in_store(msg_id,data[6:index-1])
+			else:
+				self.server.delete_value_in_store(msg_id)
 
 		# If we want to retransmit what we received to the other vessels
 		retransmit = False # Like this, we will just create infinite loops!
