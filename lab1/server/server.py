@@ -113,12 +113,6 @@ class BlackboardServer(HTTPServer):
 				self.contact_vessel(vessel, path, action, key, value)
 #------------------------------------------------------------------------------------------------------
 
-
-
-
-
-
-
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 # This class implements the logic when a server receives a GET or POST request
@@ -169,7 +163,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET_Board(self):
 		self.set_HTTP_headers(200)
 		self.make_Page()
-
+	#Constructs the html pages to be rendered
 	def make_Page(self):
 		entries = self.get_Entries()
 		header = board_frontpage_header_template
@@ -178,6 +172,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		page =  header + content + footer
 		self.wfile.write(page)
 
+	#Formats current entries into a string
 	def get_Entries(self):
 		entries = ""
 		for msg_id in sorted(self.server.store.keys()):
@@ -188,9 +183,6 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
-		# Here, we should check which path was requested and call the right logic based on it
-		# We should also parse the data received
-		# and set the headers for the client
 
 		data = self.parse_POST_request()
 		print data
@@ -205,23 +197,26 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
-	# We might want some functions here as well
-#------------------------------------------------------------------------------------------------------
+	#Handels propagation requests
 	def do_POST_Server(self,data):
+		#New entry
 		if data["action"][0] == '0':
+			#Increase our local counter 
 			self.server.current_key = int(data["key"][0])
 			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
+		#Delete entry
 		elif data["action"][0] == '1':
 			self.server.delete_value_in_store(int(data["key"][0]))
+		#Edit entry
 		elif data["action"][0] == '2':
 			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
-
+	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
 		self.server.add_value_to_store(data["entry"][0])
 		self.new_Thread(0,self.server.current_key,data["entry"][0])
-
+	#Handels edits and deletes
 	def do_POST_Edit(self,data):
-
+		#Get the id of the entry
 		msg_id = int(self.path[7:])
 		value = data["entry"][0]
 		if data["delete"][0] == "0":
@@ -230,7 +225,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		else:
 			self.server.delete_value_in_store(msg_id)
 			self.new_Thread(1,msg_id,value)
-
+	#Starts a new propagation thread
 	def new_Thread(self,action,key,value):
 		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value) )
 		# We kill the process if we kill the server
@@ -238,24 +233,13 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
-	def get_Parameters(msg):
-	    # extract the query parameters as a dictionary: {name:value}
-	    # example input format: comment=aa&ip=127.0.0.1&port=63101&action=Delete
-	    parameters = {}
-	    arr = msg.split('&')
-	    for a in arr:
-	        pp = a.split('=')
-	        if len(pp) > 1:
-	            parameters[pp[0]] = pp[1]
-	    return parameters
-
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
 # Execute the code
 if __name__ == '__main__':
 
 	## read the templates from the corresponding html files
-	# .....
+	#Loading from ./server/ since that is where mininet instances will load from
 	board_frontpage_footer_template = file("server/board_frontpage_footer_template.html").read()
 	board_frontpage_header_template = file("server/board_frontpage_header_template.html").read()
 	boardcontents_template = file("server/boardcontents_template.html").read()
