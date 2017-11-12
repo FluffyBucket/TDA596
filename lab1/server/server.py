@@ -193,6 +193,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		elif self.path == "/propagate":
 			self.do_POST_Server(data)
 
+		self.set_HTTP_headers(200)
 
 #------------------------------------------------------------------------------------------------------
 # POST Logic
@@ -201,7 +202,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_POST_Server(self,data):
 		#New entry
 		if data["action"][0] == '0':
-			#Increase our local counter 
+			#Increase our local counter
 			self.server.current_key = int(data["key"][0])
 			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
 		#Delete entry
