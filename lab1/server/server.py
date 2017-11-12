@@ -18,14 +18,14 @@ import re
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
-board_frontpage_footer_template = file("board_frontpage_footer_template.html").read()
-board_frontpage_header_template = file("board_frontpage_header_template.html").read()
-boardcontents_template = file("boardcontents_template.html").read()
-entry_template = file("entry_template.html").read()
+board_frontpage_footer_template = ""
+board_frontpage_header_template = ""
+boardcontents_template = ""
+entry_template = ""
 
 #------------------------------------------------------------------------------------------------------
 # Static variables definitions
-PORT_NUMBER = 8040
+PORT_NUMBER = 80
 #------------------------------------------------------------------------------------------------------
 
 
@@ -81,7 +81,7 @@ class BlackboardServer(HTTPServer):
 		try:
 			# We contact vessel:PORT_NUMBER since we all use the same port
 			# We can set a timeout, after which the connection fails if nothing happened
-			connection = HTTPConnection("%s:%d" % (vessel, PORT_NUMBER), timeout = 30)
+			connection = HTTPConnection("%s:%d" % (vessel_ip, PORT_NUMBER), timeout = 30)
 			# We only use POST to send data (PUT and DELETE not supported)
 			action_type = "POST"
 			# We send the HTTP request
@@ -95,7 +95,7 @@ class BlackboardServer(HTTPServer):
 				success = True
 		# We catch every possible exceptions
 		except Exception as e:
-			print ("Error while contacting %s" % vessel)
+			print ("Error while contacting %s" % vessel_ip)
 			# printing the error given by Python
 			print(e)
 
@@ -191,41 +191,63 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# Here, we should check which path was requested and call the right logic based on it
 		# We should also parse the data received
 		# and set the headers for the client
-		length = self.headers["Content-Length"]
-		data = self.rfile.read(int(length))
-		self.rfile.close()
-		if self.path == "/board":
-			self.do_POST_New_Entry(data[6:])
-		elif re.search(r'\d+',self.path):
-			index = data.find('&')
-			msg_id = int(self.path[7:])
-			if data[index:] == "&delete=0":
-				self.server.modify_value_in_store(msg_id,data[6:index])
-			else:
-				self.server.delete_value_in_store(msg_id)
 
-		# If we want to retransmit what we received to the other vessels
-		retransmit = False # Like this, we will just create infinite loops!
-		if retransmit:
-			# do_POST send the message only when the function finishes
-			# We must then create threads if we want to do some heavy computation
-			#
-			# Random content
-			thread = Thread(target=self.server.propagate_value_to_vessels,args=("action", "key", "value") )
-			# We kill the process if we kill the server
-			thread.daemon = True
-			# We start the thread
-			thread.start()
+		data = self.parse_POST_request()
+		print data
+		if self.path == "/board":
+			self.do_POST_New_Entry(data)
+		elif re.search(r'\d+',self.path):
+			self.do_POST_Edit(data)
+		elif self.path == "/propagate":
+			self.do_POST_Server(data)
+
+
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
 	# We might want some functions here as well
 #------------------------------------------------------------------------------------------------------
-	def do_POST_New_Entry(self,value):
-		self.server.add_value_to_store(value)
+	def do_POST_Server(self,data):
+		if data["action"][0] == '0':
+			self.server.current_key = int(data["key"][0])
+			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
+		elif data["action"][0] == '1':
+			self.server.delete_value_in_store(int(data["key"][0]))
+		elif data["action"][0] == '2':
+			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
 
+	def do_POST_New_Entry(self,data):
+		self.server.add_value_to_store(data["entry"][0])
+		self.new_Thread(0,self.server.current_key,data["entry"][0])
 
+	def do_POST_Edit(self,data):
 
+		msg_id = int(self.path[7:])
+		value = data["entry"][0]
+		if data["delete"][0] == "0":
+			self.server.modify_value_in_store(msg_id,value)
+			self.new_Thread(0,msg_id,value)
+		else:
+			self.server.delete_value_in_store(msg_id)
+			self.new_Thread(1,msg_id,value)
+
+	def new_Thread(self,action,key,value):
+		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value) )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+
+	def get_Parameters(msg):
+	    # extract the query parameters as a dictionary: {name:value}
+	    # example input format: comment=aa&ip=127.0.0.1&port=63101&action=Delete
+	    parameters = {}
+	    arr = msg.split('&')
+	    for a in arr:
+	        pp = a.split('=')
+	        if len(pp) > 1:
+	            parameters[pp[0]] = pp[1]
+	    return parameters
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -234,6 +256,10 @@ if __name__ == '__main__':
 
 	## read the templates from the corresponding html files
 	# .....
+	board_frontpage_footer_template = file("server/board_frontpage_footer_template.html").read()
+	board_frontpage_header_template = file("server/board_frontpage_header_template.html").read()
+	boardcontents_template = file("server/boardcontents_template.html").read()
+	entry_template = file("server/entry_template.html").read()
 
 	vessel_list = []
 	vessel_id = 0
