@@ -204,7 +204,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		if data["action"][0] == '0':
 			#Increase our local counter
 			self.server.current_key = int(data["key"][0])
-			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
+			self.server.add_value_to_store(data["value"][0])
 		#Delete entry
 		elif data["action"][0] == '1':
 			self.server.delete_value_in_store(int(data["key"][0]))
@@ -213,19 +213,20 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
-		self.server.add_value_to_store(data["entry"][0])
 		self.new_Thread(0,self.server.current_key,data["entry"][0])
+		self.server.add_value_to_store(data["entry"][0])
+
 	#Handels edits and deletes
 	def do_POST_Edit(self,data):
 		#Get the id of the entry
 		msg_id = int(self.path[7:])
 		value = data["entry"][0]
 		if data["delete"][0] == "0":
-			self.server.modify_value_in_store(msg_id,value)
 			self.new_Thread(0,msg_id,value)
+			self.server.modify_value_in_store(msg_id,value)
 		else:
-			self.server.delete_value_in_store(msg_id)
 			self.new_Thread(1,msg_id,value)
+			self.server.delete_value_in_store(msg_id)
 	#Starts a new propagation thread
 	def new_Thread(self,action,key,value):
 		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value) )
