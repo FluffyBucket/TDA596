@@ -13,6 +13,7 @@ from mininet.link import TCLink, TCIntf, Intf # Customisable links & interfaces
 from mininet.log import setLogLevel, info # Logger
 from mininet.term import makeTerm, cleanUpScreens # Open xterm from mininet
 from mininet.cli import CLI # Command Line Interface
+import sys
 #------------------------------------------------------------------------------------------------------
 
 
@@ -86,7 +87,7 @@ class Lab1():
 	def run(self, port_number):
 		"Run the lab 2 simulation environment"
 		# local variables
-		nbOfServersPerRegion = 5
+		nbOfServersPerRegion = 2
 		nbOfClientsPerRegion = 2
 		nbOfRegions = 2
 		localJitter = 10 # ms, the evolution of the time between two consecutive packets
@@ -131,7 +132,7 @@ if __name__ == '__main__':
 		print("Arguments: port_number")
 	else:
 		# We need to know the port number
-		vessel_port = int(sys.argv[1])
+		port_number = int(sys.argv[1])
 
 	# we set the log level to info, in order to display the server outputs as well
 	#setLogLevel( 'info' )
