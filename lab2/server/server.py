@@ -56,6 +56,7 @@ class BlackboardServer(HTTPServer):
 		# Decide leader
 		self.leader_id = -1
 		self.choose_leader()
+		self.check_leader()
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, value):
@@ -77,7 +78,7 @@ class BlackboardServer(HTTPServer):
 		pass
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
-	def contact_vessel(self, vessel_id, path, post_content):
+	def contact_vessel(self, action_type, vessel_id, path, post_content):
 		# the Boolean variable we will return
 		success = False
 		# the HTTP header must contain the type of data we are transmitting, here URL encoded
@@ -87,8 +88,6 @@ class BlackboardServer(HTTPServer):
 			# We contact vessel:PORT_NUMBER since we all use the same port
 			# We can set a timeout, after which the connection fails if nothing happened
 			connection = HTTPConnection("10.1.0.%d:%d" % (vessel_id, port), timeout = 30)
-			# We only use POST to send data (PUT and DELETE not supported)
-			action_type = "POST"
 			# We send the HTTP request
 			connection.request(action_type, path, post_content, headers)
 			# We retrieve the response
@@ -113,29 +112,49 @@ class BlackboardServer(HTTPServer):
 		for vessel_id in self.vessels.keys():
 			# We should not send it to our own IP, or we would create an infinite loop of updates
 			if vessel_id != self.vessel_id:
-				self.contact_request(vessel_id, path, post_content)
+				self.contact_request("POST", vessel_id, path, post_content)
 
+	def send_to_leader(self, action_type, path, post_content):
+		self.contact_request(action_type, self.leader_id, path, post_content)
 
-	def send_to_leader(self, path, post_content):
-		self.contact_request(self.leader_id, path, post_content)
-
-	def contact_request(self, vessel_id, path, post_content):
+	def contact_request(self, action_type, vessel_id, path, post_content):
 		# Create a new thread that will handle retries
-		thread = Thread(target=self.contact_request,args=(self.leader_id, path, post_content))
+		thread = Thread(target=self.contact_request_thread,args=(action_type,vessel_id, path, post_content))
 		# We kill the process if we kill the server
 		thread.daemon = True
 		# We start the thread
 		thread.start()
 
-	def contact_request_thread(self, vessel_id, path, post_content):
+	def contact_request_thread(self,action_type, vessel_id, path, post_content):
 		count = 0
 		while count < RETRY_COUNTS:
-			if self.contact_vessel(vessel_id, path, post_content):
-				pass
+			if self.contact_vessel(action_type,vessel_id, path, post_content):
+				break
 			else:
 				count += 1
-				print count
-				sleep(RETRY_WAIT_TIME)
+				time.sleep(RETRY_WAIT_TIME)
+		if count == RETRY_COUNTS:
+			self.remove_from_vessels(vessel_id)
+
+	def remove_from_vessels(self,vessel_id):
+		print "REMOVE HIM! %d" % vessel_id
+		#New election!
+		if vessel_id == self.leader_id:
+			self.leader_id = -1
+			self.choose_leader()
+		del self.vessels[vessel_id]
+
+	def check_leader(self):
+		thread = Thread(target=self.check_leader_thread)
+		thread.daemon = True
+		thread.start()
+
+	def check_leader_thread(self):
+		while True:
+			if not self.is_leader() and self.leader_id != -1:
+				print "Testing leader! %d" % self.leader_id
+				self.send_to_leader("GET","/leader","")
+				time.sleep(5)
 #------------------------------------------------------------------------------------------------------
 
 	def choose_leader(self):
@@ -145,18 +164,19 @@ class BlackboardServer(HTTPServer):
 		# We start the thread
 		thread.start()
 	def leader_election(self):
+		self.clear_leader_values()
 		data_collection_complete = False
 		neighbor = self.find_neighbor()
 		leader_value = random.randint(0,pow(len(self.vessels)+1,4))
 		self.vessels[self.vessel_id] = leader_value
 		while self.leader_id == -1:
 			if len(self.vessels) != 0:
-				#We wait until we have get all the data from the other nodes
+				#We wait until we have all the data from the other nodes
 				if not data_collection_complete:
 					data_collection_complete = self.is_leader_data_complete()
 					post_content = urlencode({'vessels': self.vessels})
-					self.contact_vessel(neighbor,"/election",post_content)
-					time.sleep(1)
+					self.contact_vessel("POST", neighbor,"/election",post_content)
+					time.sleep(0.5)
 				else:
 					max_leader = leader_value
 					self.leader_id = self.vessel_id
@@ -167,6 +187,11 @@ class BlackboardServer(HTTPServer):
 			else:
 				self.leader_id = self.vessel_id
 				print "No other vessels :C\n"
+
+	def clear_leader_values(self):
+		for key in self.vessels.keys():
+			self.vessels[key] = -1
+
 	def is_leader_data_complete(self):
 		for vessel_id in self.vessels.keys():
 			if self.vessels[vessel_id] == -1:
@@ -238,6 +263,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 				self.do_GET_Index()
 			elif self.path == "/board":
 				self.do_GET_Board()
+			elif self.path == "/leader":
+				self.set_HTTP_headers(200)
 		else:
 			self.do_GET_NoLeader()
 #------------------------------------------------------------------------------------------------------
@@ -273,12 +300,13 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		for msg_id in sorted(self.server.store.keys()):
 			entries += entry_template % ("board/%d"% msg_id,msg_id,self.server.store[msg_id])
 		return entries
+
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
-
+		self.set_HTTP_headers(200)
 		data = self.parse_POST_request()
 		if self.path == "/board":
 			self.do_POST_New_Entry(data)
@@ -289,15 +317,17 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		elif self.path == "/election":
 			self.do_Leader_Election(data)
 
-		self.set_HTTP_headers(200)
+
 
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
 	#Handels propagation requests, used by children to get their commands from the leader
 	def do_POST_Server(self,data):
+		print data
 		#New entry
 		if data["action"][0] == '0':
+			self.server.current_key = int(data["key"][0])
 			self.server.modify_value_in_store(int(data["key"][0]), data["value"][0])
 		#Delete entry
 		elif data["action"][0] == '1':
@@ -342,7 +372,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def to_leader(self,path,value,delete):
 		# The variables must be encoded in the URL format, through urllib.urlencode
 		post_content = urlencode({'entry': value,'delete': delete})
-		thread = Thread(target=self.server.send_to_leader,args=(path,post_content) )
+		thread = Thread(target=self.server.send_to_leader,args=("POST",path,post_content) )
 		# We kill the process if we kill the server
 		thread.daemon = True
 		# We start the thread
