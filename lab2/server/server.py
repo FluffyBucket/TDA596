@@ -27,7 +27,12 @@ boardcontents_template = ""
 entry_template = ""
 
 #------------------------------------------------------------------------------------------------------
+# How many times should we try to resend a message
+RETRY_COUNTS = 5
+# How long should we wait before we try to resend a messege
+RETRY_WAIT_TIME = 0.1
 #------------------------------------------------------------------------------------------------------
+# The port we should use, it is just instanciated to 0
 port = 0
 
 
@@ -108,12 +113,29 @@ class BlackboardServer(HTTPServer):
 		for vessel_id in self.vessels.keys():
 			# We should not send it to our own IP, or we would create an infinite loop of updates
 			if vessel_id != self.vessel_id:
-				# A good practice would be to try again if the request failed
-				# Here, we do it only once
-				self.contact_vessel(vessel_id, path, post_content)
+				self.contact_request(vessel_id, path, post_content)
+
 
 	def send_to_leader(self, path, post_content):
-		self.contact_vessel(self.leader_id, path, post_content)
+		self.contact_request(self.leader_id, path, post_content)
+
+	def contact_request(self, vessel_id, path, post_content):
+		# Create a new thread that will handle retries
+		thread = Thread(target=self.contact_request,args=(self.leader_id, path, post_content))
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+
+	def contact_request_thread(self, vessel_id, path, post_content):
+		count = 0
+		while count < RETRY_COUNTS:
+			if self.contact_vessel(vessel_id, path, post_content):
+				pass
+			else:
+				count += 1
+				print count
+				sleep(RETRY_WAIT_TIME)
 #------------------------------------------------------------------------------------------------------
 
 	def choose_leader(self):
