@@ -57,7 +57,9 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 		# Decide leader
 		self.leader_id = -1
-		self.choose_leader()
+		self.leader_value = random.randint(0,pow(len(self.vessels)+1,4))
+		self.vessels[self.vessel_id] = self.leader_value
+		self.leader_election()
 		self.check_leader()
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
@@ -70,13 +72,15 @@ class BlackboardServer(HTTPServer):
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
 		# we modify a value in the store if it exists
-		self.store[key] = value
+		if key in self.store:
+			self.store[key] = value
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
 		# we delete a value in the store if it exists
-		del self.store[key]
+		if key in self.store:
+			del self.store[key]
 		pass
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -139,19 +143,13 @@ class BlackboardServer(HTTPServer):
 			self.remove_from_vessels(vessel_id)
 
 	def remove_from_vessels(self,vessel_id):
-		print "REMOVE HIM! %d" % vessel_id
+
+		if vessel_id in self.vessels:
+			del self.vessels[vessel_id]
 		#New election!
 		if vessel_id == self.leader_id:
 			self.leader_id = -1
-			self.choose_leader()
-		try:
-			if vessel_id in self.vessels:
-				del self.vessels[vessel_id]
-		# We catch every possible exceptions
-		except Exception as e:
-			print ("Error while removing %s" % vessel_id)
-			# printing the error given by Python
-			print(e)
+			self.leader_election()
 
 
 	def check_leader(self):
@@ -167,38 +165,28 @@ class BlackboardServer(HTTPServer):
 				time.sleep(5)
 #------------------------------------------------------------------------------------------------------
 
-	def choose_leader(self):
-		thread = Thread(target=self.leader_election)
-		# We kill the process if we kill the server
-		thread.daemon = True
-		# We start the thread
-		thread.start()
 	def leader_election(self):
-		# We clear current gathered leader values, need to this in case of a new election
-		self.clear_leader_values()
-		data_collection_complete = False
-		leader_value = random.randint(0,pow(len(self.vessels)+1,4))
-		self.vessels[self.vessel_id] = leader_value
-		while self.leader_id == -1:
-			if len(self.vessels) != 0:
-				neighbor = self.find_neighbor()
-				#We wait until we have all the data from the other nodes
-				if not data_collection_complete:
-					data_collection_complete = self.is_leader_data_complete()
-					post_content = urlencode({'vessels': self.vessels})
-					self.send_to_node("POST", neighbor,"/election",post_content)
-					time.sleep(ELECTION_WAIT_TIME)
-				else:
-					max_leader = leader_value
-					self.leader_id = self.vessel_id
-					for vessel_id in self.vessels.keys():
-						if self.vessels[vessel_id] > max_leader:
-							max_leader = self.vessels[vessel_id]
-							self.leader_id = vessel_id
-					self.send_to_node("POST", neighbor,"/election",post_content)
+		if len(self.vessels) != 0:
+			neighbor = self.find_neighbor()
+			data_collection_complete = self.is_leader_data_complete()
+			post_content = urlencode({'vessels': self.vessels})
+			#We wait until we have all the data from the other nodes
+			if not data_collection_complete:
+				self.send_to_node("POST", neighbor,"/election",post_content)
 			else:
+				max_leader = self.leader_value
 				self.leader_id = self.vessel_id
-				print "No other vessels :C\n"
+				for vessel_id in self.vessels.keys():
+					if self.vessels[vessel_id] > max_leader:
+						max_leader = self.vessels[vessel_id]
+						self.leader_id = vessel_id
+					elif self.vessels[vessel_id] == max_leader:
+						if self.leader_id < vessel_id:
+							self.leader_id = vessel_id
+				self.send_to_node("POST", neighbor,"/election",post_content)
+		else:
+			self.leader_id = self.vessel_id
+			print "No other vessels :C\n"
 
 	def clear_leader_values(self):
 		for key in self.vessels.keys():
@@ -213,11 +201,8 @@ class BlackboardServer(HTTPServer):
 	def modify_vessels_leader_value(self,vessels):
 		for vessel_id in self.vessels.keys():
 			if not (vessel_id in vessels):
-				print "NOT IN VESSEL LIST: %d" % vessel_id
-
 				self.remove_from_vessels(vessel_id)
-				time.sleep(5)
-			if vessels[vessel_id] != -1:
+			elif vessels[vessel_id] != -1:
 				self.vessels[vessel_id] = vessels[vessel_id]
 
 	def find_neighbor(self):
@@ -405,6 +390,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			v_id = int(self.client_address[0].split('.')[3])
 			self.server.send_to_node("POST",v_id,"/election/result",post_content)
 			print "LEADER IS ELECTED!"
+		else:
+			self.server.leader_election()
 	def accept_leader(self,data):
 		vessels = ast.literal_eval(data["vessels"][0])
 		self.server.vessels = vessels
@@ -440,7 +427,7 @@ if __name__ == '__main__':
 	# We launch a server
 	server = BlackboardServer(('', port), BlackboardRequestHandler, vessel_id, vessel_list)
 	print("Starting the server on port %d" % port)
-
+	time.sleep(5)
 	try:
 		server.serve_forever()
 	except KeyboardInterrupt:
