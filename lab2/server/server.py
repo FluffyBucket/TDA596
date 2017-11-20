@@ -31,8 +31,8 @@ entry_template = ""
 RETRY_COUNTS = 5
 # How long should we wait before we try to resend a messege
 RETRY_WAIT_TIME = 0.1
-# How long should we wait until we send our data to the neighbor
-ELECTION_WAIT_TIME = 1
+# Delay between contacting the leader
+LEADER_ALIVE_CHECK_TIME = 5
 #------------------------------------------------------------------------------------------------------
 # The port we should use, it is just instanciated to 0
 port = 0
@@ -143,7 +143,6 @@ class BlackboardServer(HTTPServer):
 			self.remove_from_vessels(vessel_id)
 
 	def remove_from_vessels(self,vessel_id):
-
 		if vessel_id in self.vessels:
 			del self.vessels[vessel_id]
 		#New election!
@@ -160,51 +159,54 @@ class BlackboardServer(HTTPServer):
 	def check_leader_thread(self):
 		while True:
 			if not self.is_leader() and self.leader_id != -1:
-				print "Testing leader! %d" % self.leader_id
 				self.send_to_node("GET",self.leader_id,"/leader","")
-				time.sleep(5)
+				time.sleep(LEADER_ALIVE_CHECK_TIME)
 #------------------------------------------------------------------------------------------------------
 
+	# Leader election: in O(3n)=O(n) time
+	# Check for neighbor, if it has changed.
+	# Check if we have collected all the data.
+	# If data collection is complete, iterate through and select a leader.
+	# Send the complete set of data to the neighbor.
 	def leader_election(self):
 		if len(self.vessels) != 0:
 			neighbor = self.find_neighbor()
 			data_collection_complete = self.is_leader_data_complete()
 			post_content = urlencode({'vessels': self.vessels})
-			#We wait until we have all the data from the other nodes
-			if not data_collection_complete:
-				self.send_to_node("POST", neighbor,"/election",post_content)
-			else:
+			if data_collection_complete:
 				max_leader = self.leader_value
 				self.leader_id = self.vessel_id
 				for vessel_id in self.vessels.keys():
 					if self.vessels[vessel_id] > max_leader:
 						max_leader = self.vessels[vessel_id]
 						self.leader_id = vessel_id
+					# Handels the unlikely case of the random value is the same, by selecting the one with highest id
 					elif self.vessels[vessel_id] == max_leader:
 						if self.leader_id < vessel_id:
 							self.leader_id = vessel_id
-				self.send_to_node("POST", neighbor,"/election",post_content)
+			self.send_to_node("POST", neighbor,"/election",post_content)
 		else:
 			self.leader_id = self.vessel_id
 			print "No other vessels :C\n"
-
+	# Reset the nodes collected data, in O(n) time
 	def clear_leader_values(self):
 		for key in self.vessels.keys():
 			self.vessels[key] = -1
-
+	# Check if the data is complete in O(n) time
 	def is_leader_data_complete(self):
 		for vessel_id in self.vessels.keys():
 			if self.vessels[vessel_id] == -1:
 				return False
 		return True
 
+	# Adds values that does not exist to our list, removes those that does not exist in vessels param, O(n) time
 	def modify_vessels_leader_value(self,vessels):
 		for vessel_id in self.vessels.keys():
 			if not (vessel_id in vessels):
 				self.remove_from_vessels(vessel_id)
 			elif vessels[vessel_id] != -1:
 				self.vessels[vessel_id] = vessels[vessel_id]
-
+	# Find the nodes nearest node, in O(n) time
 	def find_neighbor(self):
 		neighbor = self.vessel_id
 		v_list = sorted(self.vessels.keys())
@@ -219,6 +221,7 @@ class BlackboardServer(HTTPServer):
 
 		return neighbor
 
+	# Check if the node is leader
 	def is_leader(self):
 		if self.leader_id == self.vessel_id:
 			return True
@@ -331,8 +334,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		print data
 		#New entry
 		if data["action"][0] == '0':
-			self.server.current_key = int(data["key"][0])
-			self.server.modify_value_in_store(int(data["key"][0]), data["value"][0])
+			self.server.current_key = int(data["key"][0]) -1
+			self.server.add_value_to_store(data["value"][0])
 		#Delete entry
 		elif data["action"][0] == '1':
 			self.server.delete_value_in_store(int(data["key"][0]))
@@ -373,6 +376,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
+	# Sends data to the leader
 	def to_leader(self,path,value,delete):
 		# The variables must be encoded in the URL format, through urllib.urlencode
 		post_content = urlencode({'entry': value,'delete': delete})
@@ -382,6 +386,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
+	# Do leader election:
+	# If we do have a leader we transmit the result to the sender node
+	# If the don't have a leader set yet we continue the leader election
 	def do_Leader_Election(self,data):
 		vessels = ast.literal_eval(data["vessels"][0])
 		self.server.modify_vessels_leader_value(vessels)
@@ -392,6 +399,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			print "LEADER IS ELECTED!"
 		else:
 			self.server.leader_election()
+	# If we get the result from a sender node we accept we result
+	# We update our own vessel list to the current one
 	def accept_leader(self,data):
 		vessels = ast.literal_eval(data["vessels"][0])
 		self.server.vessels = vessels
@@ -427,7 +436,7 @@ if __name__ == '__main__':
 	# We launch a server
 	server = BlackboardServer(('', port), BlackboardRequestHandler, vessel_id, vessel_list)
 	print("Starting the server on port %d" % port)
-	time.sleep(5)
+	time.sleep(2)
 	try:
 		server.serve_forever()
 	except KeyboardInterrupt:
