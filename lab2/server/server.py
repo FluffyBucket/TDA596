@@ -436,7 +436,7 @@ if __name__ == '__main__':
 	# We launch a server
 	server = BlackboardServer(('', port), BlackboardRequestHandler, vessel_id, vessel_list)
 	print("Starting the server on port %d" % port)
-	time.sleep(2)
+	time.sleep(5)
 	try:
 		server.serve_forever()
 	except KeyboardInterrupt:
