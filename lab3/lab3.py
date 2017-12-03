@@ -1,6 +1,6 @@
 # coding=utf-8
 #------------------------------------------------------------------------------------------------------
-# TDA596 - Lab 2
+# TDA596 - Lab 3
 # This script creates the distributed system, runs the simulation and launches the servers app
 # Contains two classes: Lab1Topology and Lab1
 # This script does not need any modification
@@ -13,7 +13,6 @@ from mininet.link import TCLink, TCIntf, Intf # Customisable links & interfaces
 from mininet.log import setLogLevel, info # Logger
 from mininet.term import makeTerm, cleanUpScreens # Open xterm from mininet
 from mininet.cli import CLI # Command Line Interface
-import sys
 #------------------------------------------------------------------------------------------------------
 
 
@@ -22,7 +21,7 @@ import sys
 #------------------------------------------------------------------------------------------------------
 # Lab1Topology - class inheriting from mininet.topo.Topo, defines the network topology
 class Lab1Topology( Topo ):
-	"Creates the network topology on which the lab 2 runs"
+	"Creates the network topology on which the lab 1 runs"
 #------------------------------------------------------------------------------------------------------
 	# Initialize variables
 	def build(self, nbOfServersPerRegion = 5, nbOfClientsPerRegion = 2, nbOfRegions = 2, **opts):
@@ -78,16 +77,16 @@ class Lab1Topology( Topo ):
 class Lab1():
 #------------------------------------------------------------------------------------------------------
 	# Open an xterm and launch a specific command
-	def startServer(self, server, nbOfServers,port_number):
+	def startServer(self, server, nbOfServers):
 		# Call mininet.term.makeTerm
-		makeTerm(node=server, cmd="python server/server.py %s %d %d" % (server.IP().replace("10.1.0.",""), nbOfServers, port_number) )
+		makeTerm(node=server, cmd="python server/server.py %s %d" % (server.IP().replace("10.1.0.",""), nbOfServers) )
 #------------------------------------------------------------------------------------------------------
 	# run(self)
 	# Run the lab 1
-	def run(self, port_number):
-		"Run the lab 2 simulation environment"
+	def run(self):
+		"Run the lab 1 simulation environment"
 		# local variables
-		nbOfServersPerRegion = 4
+		nbOfServersPerRegion = 5
 		nbOfClientsPerRegion = 2
 		nbOfRegions = 2
 		localJitter = 10 # ms, the evolution of the time between two consecutive packets
@@ -111,7 +110,7 @@ class Lab1():
 		for server in simulation.hosts:
 			if "vessel" in server.name:
 				# We open a xterm and start the server
-				self.startServer(server, nbOfServersPerRegion*nbOfRegions,port_number)
+				self.startServer(server, nbOfServersPerRegion*nbOfRegions)
 		# We also start the Command Line Interface of Mininet
 		CLI(simulation)
 		# Once the CLI is closed (with exit), we can stop the simulation
@@ -127,15 +126,8 @@ class Lab1():
 #------------------------------------------------------------------------------------------------------
 # If the script was directly launched (and that should be the case!)
 if __name__ == '__main__':
-	port_number = 0
-	if len(sys.argv) != 2: # 2 args, the script and the vessel name
-		print("Arguments: port_number")
-	else:
-		# We need to know the port number
-		port_number = int(sys.argv[1])
-
 	# we set the log level to info, in order to display the server outputs as well
 	#setLogLevel( 'info' )
 	lab = Lab1 ()
-	lab.run(port_number)
+	lab.run()
 #------------------------------------------------------------------------------------------------------
