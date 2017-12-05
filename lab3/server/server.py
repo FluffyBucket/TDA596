@@ -48,25 +48,55 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
-	def add_value_to_store(self, value):
+	def add_value_to_store(self, key, value, origin_id):
 		# We add the value to the store
-		self.current_key += 1
-		self.store[self.current_key] = value
-
+		self.current_key = key
+		if key in self.store:
+			self.insert_into_store(key,value,origin_id)
+		else:
+			self.store[self.current_key] = (value,origin_id)
 		pass
+
+	# This func will insert an item at its correct position
+	def insert_into_store(self, key,value, origin_id):
+		current_element = key
+		current_origin = origin_id
+		current_value = value
+		store = sorted(self.store.keys())
+		temp = (0,0)
+		for index,m in enumerate(store):
+			if m == current_element:
+				tup = self.store[m]
+				if tup[1] < current_origin:
+					temp = self.store[m]
+					print temp
+					print tup
+					self.store[m] = (current_value,current_origin)
+					print self.store[m]
+					current_origin = temp[1]
+					current_value = temp[0]
+					if self.current_key == m:
+						self.store[m+1] = (current_value,current_origin)
+						self.current_key = m + 1
+					else:
+						current_element = store[index+1]
+
+
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,key,value):
 		# we modify a value in the store if it exists
 		print "change: %d\t%s" % (key,value)
-		self.store[key] = value
+		if key in self.store:
+			self.store[key] = value
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,key):
 		# we delete a value in the store if it exists
 		print "delete: %d" % key
-		del self.store[key]
+		if key in self.store:
+			del self.store[key]
 		pass
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -198,13 +228,15 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
+
 	#Handels propagation requests
 	def do_POST_Server(self,data):
 		#New entry
 		if data["action"][0] == '0':
 			#Increase our local counter
-			self.server.current_key = int(data["key"][0])
-			self.server.add_value_to_store(data["value"][0])
+			v_id = 1#int(self.client_address[0].split('.')[3])
+			#self.server.current_key = int(data["key"][0]) - 1
+			self.server.add_value_to_store(int(data["key"][0]),data["value"][0],v_id)
 		#Delete entry
 		elif data["action"][0] == '1':
 			self.server.delete_value_in_store(int(data["key"][0]))
@@ -214,7 +246,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
 		self.new_Thread(0,self.server.current_key,data["entry"][0])
-		self.server.add_value_to_store(data["entry"][0])
+		self.server.add_value_to_store(self.server.current_key+1,data["entry"][0],self.server.vessel_id)
+		self.server.add_value_to_store(self.server.current_key,data["entry"][0],self.server.vessel_id)
 
 	#Handels edits and deletes
 	def do_POST_Edit(self,data):
