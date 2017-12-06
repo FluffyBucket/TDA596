@@ -24,8 +24,7 @@ boardcontents_template = ""
 entry_template = ""
 
 #------------------------------------------------------------------------------------------------------
-# Static variables definitions
-PORT_NUMBER = 80
+port = 0
 #------------------------------------------------------------------------------------------------------
 
 
@@ -284,17 +283,19 @@ if __name__ == '__main__':
 	vessel_id = 0
 	# Checking the arguments
 	if len(sys.argv) != 3: # 2 args, the script and the vessel name
-		print("Arguments: vessel_ID number_of_vessels")
+		print("Arguments: vessel_ID number_of_vessels port_number")
 	else:
 		# We need to know the vessel IP
 		vessel_id = int(sys.argv[1])
+		#Get the port number
+		port = int(sys.argv[3])
 		# We need to write the other vessels IP, based on the knowledge of their number
 		for i in range(1, int(sys.argv[2])+1):
 			vessel_list.append("10.1.0.%d" % i) # We can add ourselves, we have a test in the propagation
 
 	# We launch a server
 	server = BlackboardServer(('', PORT_NUMBER), BlackboardRequestHandler, vessel_id, vessel_list)
-	print("Starting the server on port %d" % PORT_NUMBER)
+	print("Starting the server on port %d" % port)
 
 	try:
 		server.serve_forever()
