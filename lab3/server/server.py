@@ -14,6 +14,7 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
+from operator import itemgetter
 import re
 #------------------------------------------------------------------------------------------------------
 
@@ -38,9 +39,13 @@ class BlackboardServer(HTTPServer):
 	# We call the super init
 		HTTPServer.__init__(self,server_address, handler)
 		# we create the dictionary of values
-		self.store = {}
+		self.store = []
+		# Short backlog of messages, for a post
+		self.history = {}
 		# We keep a variable of the next id to insert
 		self.current_key = -1
+
+		self.seq_number = -1
 		# our own ID (IP is 10.1.0.ID)
 		self.vessel_id = vessel_id
 		# The list of other vessels
@@ -48,55 +53,72 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, key, value, origin_id):
+		self.seq_number + 1
 		# We add the value to the store
 		self.current_key = key
-		if key in self.store:
-			self.insert_into_store(key,value,origin_id)
-		else:
-			self.store[self.current_key] = (value,origin_id)
+		self.insert_into_store(key,value,origin_id)
 		pass
 
 	# This func will insert an item at its correct position
 	def insert_into_store(self, key,value, origin_id):
+		current_key = key
+		current_origin = origin_id
+		current_value = value
+		self.store.append((value,origin_id,key))
+		#if key not in [k for k in self.store if k[2] == key]:
+		self.sort_store()
+	def sort_store(self):
+		self.store.sort(key=itemgetter(2,1))
+		#for index,m in enumerate(self.store):
+			#if m[2] == current_key:
+				#if m[1] <= current_origin:
+					#self.store.insert(index,(current_value,current_origin,current_key))
+
+
+	def insert_into_store2(self, key,value, origin_id):
 		current_element = key
 		current_origin = origin_id
 		current_value = value
 		store = sorted(self.store.keys())
-		temp = (0,0)
+		temp = (value,origin_id)
 		for index,m in enumerate(store):
 			if m == current_element:
 				tup = self.store[m]
 				if tup[1] < current_origin:
 					temp = self.store[m]
-					print temp
-					print tup
 					self.store[m] = (current_value,current_origin)
-					print self.store[m]
-					current_origin = temp[1]
 					current_value = temp[0]
-					if self.current_key == m:
-						self.store[m+1] = (current_value,current_origin)
-						self.current_key = m + 1
-					else:
-						current_element = store[index+1]
+					current_origin = temp[1]
+					current_element = store[index+1]
+				if self.current_key == m:
+					self.store[m+1] = temp
+					self.current_key = m + 1
 
-
-#------------------------------------------------------------------------------------------------------
-	# We modify a value received in the store
-	def modify_value_in_store(self,key,value):
-		# we modify a value in the store if it exists
-		print "change: %d\t%s" % (key,value)
-		if key in self.store:
-			self.store[key] = value
-		pass
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
-	def delete_value_in_store(self,key):
+	def delete_value_in_store(self,key,value):
+		self.seq_number + 1
 		# we delete a value in the store if it exists
 		print "delete: %d" % key
 		if key in self.store:
-			del self.store[key]
+			if self.store[key][2] < value[2]:
+				del self.store[key]
+		else:
+			self.history[key] = (1,(0,0,0))
 		pass
+#------------------------------------------------------------------------------------------------------
+	# We modify a value received in the store
+	def modify_value_in_store(self,key,value):
+		self.seq_number + 1
+		# we modify a value in the store if it exists
+		print "change: %d\t%s" % (key,value)
+		if key in self.store:
+			if self.store[key][2] < value[2]:
+				self.store[key] = value
+		else:
+			self.history[key] = (2,value)
+		pass
+
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
 	def contact_vessel(self, vessel_ip, path, action, key, value):
@@ -110,7 +132,7 @@ class BlackboardServer(HTTPServer):
 		try:
 			# We contact vessel:PORT_NUMBER since we all use the same port
 			# We can set a timeout, after which the connection fails if nothing happened
-			connection = HTTPConnection("%s:%d" % (vessel_ip, PORT_NUMBER), timeout = 30)
+			connection = HTTPConnection("%s:%d" % (vessel_ip, port), timeout = 30)
 			# We only use POST to send data (PUT and DELETE not supported)
 			action_type = "POST"
 			# We send the HTTP request
@@ -204,8 +226,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	#Formats current entries into a string
 	def get_Entries(self):
 		entries = ""
-		for msg_id in sorted(self.server.store.keys()):
-			entries += entry_template % ("board/%d"% msg_id,msg_id,self.server.store[msg_id])
+		for index,msg in enumerate(self.server.store):
+			entries += entry_template % ("board/%d"% index,index,msg)
 		return entries
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
@@ -233,32 +255,32 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		#New entry
 		if data["action"][0] == '0':
 			#Increase our local counter
-			v_id = 1#int(self.client_address[0].split('.')[3])
+			v_id = int(self.client_address[0].split('.')[3])
 			#self.server.current_key = int(data["key"][0]) - 1
 			self.server.add_value_to_store(int(data["key"][0]),data["value"][0],v_id)
 		#Delete entry
 		elif data["action"][0] == '1':
-			self.server.delete_value_in_store(int(data["key"][0]))
+			self.server.delete_value_in_store(int(data["key"][0]),data["value"][0])
 		#Edit entry
 		elif data["action"][0] == '2':
 			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
-		self.new_Thread(0,self.server.current_key,data["entry"][0])
+		self.new_Thread(0,self.server.current_key+1,data["entry"][0])
 		self.server.add_value_to_store(self.server.current_key+1,data["entry"][0],self.server.vessel_id)
-		self.server.add_value_to_store(self.server.current_key,data["entry"][0],self.server.vessel_id)
 
 	#Handels edits and deletes
 	def do_POST_Edit(self,data):
 		#Get the id of the entry
 		msg_id = int(self.path[7:])
 		value = data["entry"][0]
+		value[2] += 1
 		if data["delete"][0] == "0":
-			self.new_Thread(0,msg_id,value)
+			self.new_Thread(2,msg_id,value)
 			self.server.modify_value_in_store(msg_id,value)
 		else:
 			self.new_Thread(1,msg_id,value)
-			self.server.delete_value_in_store(msg_id)
+			self.server.delete_value_in_store(msg_id,value)
 	#Starts a new propagation thread
 	def new_Thread(self,action,key,value):
 		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value) )
@@ -282,7 +304,7 @@ if __name__ == '__main__':
 	vessel_list = []
 	vessel_id = 0
 	# Checking the arguments
-	if len(sys.argv) != 3: # 2 args, the script and the vessel name
+	if len(sys.argv) != 4: # 3 args, the script and the vessel name
 		print("Arguments: vessel_ID number_of_vessels port_number")
 	else:
 		# We need to know the vessel IP
@@ -294,7 +316,7 @@ if __name__ == '__main__':
 			vessel_list.append("10.1.0.%d" % i) # We can add ourselves, we have a test in the propagation
 
 	# We launch a server
-	server = BlackboardServer(('', PORT_NUMBER), BlackboardRequestHandler, vessel_id, vessel_list)
+	server = BlackboardServer(('', port), BlackboardRequestHandler, vessel_id, vessel_list)
 	print("Starting the server on port %d" % port)
 
 	try:
