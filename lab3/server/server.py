@@ -15,6 +15,7 @@ from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
 from operator import itemgetter
+from ast import literal_eval as make_tuple
 import re
 #------------------------------------------------------------------------------------------------------
 
@@ -45,7 +46,7 @@ class BlackboardServer(HTTPServer):
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 
-		self.seq_number = -1
+		self.seq_number = 0
 		# our own ID (IP is 10.1.0.ID)
 		self.vessel_id = vessel_id
 		# The list of other vessels
@@ -53,18 +54,23 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, seq, value, origin_id):
-		if seq > self.seq_number:
+		self.seq_number += 1
+		if self.seq_number < seq:
 			self.seq_number = seq
-		else:
-			self.seq_number + 1
-		# We add the value to the store
+		#if seq > self.seq_number:
+			#self.seq_number = seq
+			#self.insert_into_store(seq,value,origin_id)
+		#else:
+			#self.insert_into_store(self.seq_number,value,origin_id)
 
-		self.insert_into_store(self.seq_number,value,origin_id)
+		self.insert_into_store(seq,value,origin_id)
+
 		pass
 
 	# This func will insert an item at its correct position
-	def insert_into_store(self, seq,value, origin_id):
+	def insert_into_store(self, seq, value, origin_id):
 		self.store.append((value,origin_id,seq))
+		self.history[(origin_id,seq)] = (0,(value,origin_id,seq),origin_id,seq)
 		self.sort_store()
 
 	def sort_store(self):
@@ -97,28 +103,46 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,seq,value,origin_id):
-		self.seq_number + 1
+		self.seq_number += 1
+		if self.seq_number < seq:
+			self.seq_number = seq
 		# we delete a value in the store if it exists
-		print "delete: %d" % seq
-		if (origin_id,seq) in [(o,s) for (v,o,s) in self.store]:
-			if self.store[seq][2] < value[2]:
-				del self.store[seq]
+		deleted = make_tuple(value)
+		print "delete:%d\t%s" % (seq,value)
+		if deleted in self.store:
+			index = self.store.index(deleted)
+			old = self.history[(deleted[1],deleted[2])]
+			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
+				del self.store[index]
+				self.history[(deleted[1],deleted[2])] = (1,deleted,origin_id,seq)
 		else:
 			self.history[(origin_id,seq)] = (1,value)
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,seq,value, origin_id):
-		self.seq_number + 1
+		self.seq_number += 1
+		if self.seq_number < seq:
+			self.seq_number = seq
 		# we modify a value in the store if it exists
 		print "change: %d\t%s" % (seq,value)
 		items = [(o,s) for (v,o,s) in self.store]
-		if (value[1],value[2]) in items:
-			index = items.index((value[1],value[2]))
-			if self.history[index][1][2] < value[2]:
-				self.store[key] = value
+
+		new = make_tuple(value)
+		old = self.history[(new[1],new[2])]
+		if (new[1],new[2]) in items:
+			index = items.index((new[1],new[2]))
+			# Check if sequence number is higher and lower origin
+			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
+				self.store[index] = new
+				self.history[(new[1],new[2])] = (2,new,origin_id,seq)
+
+		elif old[0] == 1 and (old[3] == seq and old[2] >= origin_id or old[3] < seq):
+			self.store.append(new)
+			self.sort_store()
+
 		else:
-			self.history[(origin_id,seq)] = (2,value)
+			self.history[(new[1],new[2])] = (2,new,origin_id,seq)
 		pass
 
 #------------------------------------------------------------------------------------------------------
@@ -267,22 +291,24 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.server.modify_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
-		self.server.add_value_to_store(self.server.seq_number,data["entry"][0],self.server.vessel_id)
-		self.new_Thread(0,self.server.seq_number,data["entry"][0])
+		seq = self.server.seq_number
+		self.server.add_value_to_store(seq,data["entry"][0],self.server.vessel_id)
+		self.new_Thread(0,seq,data["entry"][0])
 
 	#Handels edits and deletes
 	def do_POST_Edit(self,data):
 		#Get the id of the entry
 		msg_id = int(self.path[7:])
 		value = data["entry"][0]
+		seq = self.server.seq_number
 		if data["delete"][0] == "0":
-			self.server.modify_value_in_store(self.server.seq_number,value,self.server.vessel_id)
-			self.new_Thread(2,self.server.seq_number,value)
+			self.server.modify_value_in_store(seq,value,self.server.vessel_id)
+			self.new_Thread(2,seq,value)
 		else:
-			self.server.delete_value_in_store(self.server.seq_number,value,self.server.vessel_id)
-			self.new_Thread(1,self.server.seq_number,value)
+			self.server.delete_value_in_store(seq,value,self.server.vessel_id)
+			self.new_Thread(1,seq,value)
 	#Starts a new propagation thread
-	def new_Thread(self,action,value, seq):
+	def new_Thread(self,action, seq, value):
 		post_content = urlencode({'action': action, 'seq': seq, 'value': value})
 		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, value, post_content) )
 		# We kill the process if we kill the server
