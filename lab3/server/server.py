@@ -52,21 +52,21 @@ class BlackboardServer(HTTPServer):
 		self.vessels = vessel_list
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
-	def add_value_to_store(self, key, value, origin_id):
-		self.seq_number + 1
+	def add_value_to_store(self, seq, value, origin_id):
+		if seq > self.seq_number:
+			self.seq_number = seq
+		else:
+			self.seq_number + 1
 		# We add the value to the store
-		self.current_key = key
-		self.insert_into_store(key,value,origin_id)
+
+		self.insert_into_store(self.seq_number,value,origin_id)
 		pass
 
 	# This func will insert an item at its correct position
-	def insert_into_store(self, key,value, origin_id):
-		current_key = key
-		current_origin = origin_id
-		current_value = value
-		self.store.append((value,origin_id,key))
-		#if key not in [k for k in self.store if k[2] == key]:
+	def insert_into_store(self, seq,value, origin_id):
+		self.store.append((value,origin_id,seq))
 		self.sort_store()
+
 	def sort_store(self):
 		self.store.sort(key=itemgetter(2,1))
 		#for index,m in enumerate(self.store):
@@ -96,36 +96,38 @@ class BlackboardServer(HTTPServer):
 
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
-	def delete_value_in_store(self,key,value):
+	def delete_value_in_store(self,seq,value,origin_id):
 		self.seq_number + 1
 		# we delete a value in the store if it exists
-		print "delete: %d" % key
-		if key in self.store:
-			if self.store[key][2] < value[2]:
-				del self.store[key]
+		print "delete: %d" % seq
+		if (origin_id,seq) in [(o,s) for (v,o,s) in self.store]:
+			if self.store[seq][2] < value[2]:
+				del self.store[seq]
 		else:
-			self.history[key] = (1,(0,0,0))
+			self.history[(origin_id,seq)] = (1,value)
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
-	def modify_value_in_store(self,key,value):
+	def modify_value_in_store(self,seq,value, origin_id):
 		self.seq_number + 1
 		# we modify a value in the store if it exists
-		print "change: %d\t%s" % (key,value)
-		if key in self.store:
-			if self.store[key][2] < value[2]:
+		print "change: %d\t%s" % (seq,value)
+		items = [(o,s) for (v,o,s) in self.store]
+		if (value[1],value[2]) in items:
+			index = items.index((value[1],value[2]))
+			if self.history[index][1][2] < value[2]:
 				self.store[key] = value
 		else:
-			self.history[key] = (2,value)
+			self.history[(origin_id,seq)] = (2,value)
 		pass
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
-	def contact_vessel(self, vessel_ip, path, action, key, value):
+	def contact_vessel(self, vessel_ip, path, action, value,post_content):
 		# the Boolean variable we will return
 		success = False
 		# The variables must be encoded in the URL format, through urllib.urlencode
-		post_content = urlencode({'action': action, 'key': key, 'value': value})
+
 		# the HTTP header must contain the type of data we are transmitting, here URL encoded
 		headers = {"Content-type": "application/x-www-form-urlencoded"}
 		# We should try to catch errors when contacting the vessel
@@ -154,14 +156,14 @@ class BlackboardServer(HTTPServer):
 		return success
 #------------------------------------------------------------------------------------------------------
 	# We send a received value to all the other vessels of the system
-	def propagate_value_to_vessels(self, path, action, key, value):
+	def propagate_value_to_vessels(self, path, action, value, post_content):
 		# We iterate through the vessel list
 		for vessel in self.vessels:
 			# We should not send it to our own IP, or we would create an infinite loop of updates
 			if vessel != ("10.1.0.%s" % self.vessel_id):
 				# A good practice would be to try again if the request failed
 				# Here, we do it only once
-				self.contact_vessel(vessel, path, action, key, value)
+				self.contact_vessel(vessel, path, action, value, post_content)
 #------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------
@@ -252,38 +254,37 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 	#Handels propagation requests
 	def do_POST_Server(self,data):
+		v_id = int(self.client_address[0].split('.')[3])
 		#New entry
 		if data["action"][0] == '0':
-			#Increase our local counter
-			v_id = int(self.client_address[0].split('.')[3])
 			#self.server.current_key = int(data["key"][0]) - 1
-			self.server.add_value_to_store(int(data["key"][0]),data["value"][0],v_id)
+			self.server.add_value_to_store(int(data["seq"][0]),data["value"][0],v_id)
 		#Delete entry
 		elif data["action"][0] == '1':
-			self.server.delete_value_in_store(int(data["key"][0]),data["value"][0])
+			self.server.delete_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
 		#Edit entry
 		elif data["action"][0] == '2':
-			self.server.modify_value_in_store(int(data["key"][0]),data["value"][0])
+			self.server.modify_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
-		self.new_Thread(0,self.server.current_key+1,data["entry"][0])
-		self.server.add_value_to_store(self.server.current_key+1,data["entry"][0],self.server.vessel_id)
+		self.server.add_value_to_store(self.server.seq_number,data["entry"][0],self.server.vessel_id)
+		self.new_Thread(0,self.server.seq_number,data["entry"][0])
 
 	#Handels edits and deletes
 	def do_POST_Edit(self,data):
 		#Get the id of the entry
 		msg_id = int(self.path[7:])
 		value = data["entry"][0]
-		value[2] += 1
 		if data["delete"][0] == "0":
-			self.new_Thread(2,msg_id,value)
-			self.server.modify_value_in_store(msg_id,value)
+			self.server.modify_value_in_store(self.server.seq_number,value,self.server.vessel_id)
+			self.new_Thread(2,self.server.seq_number,value)
 		else:
-			self.new_Thread(1,msg_id,value)
-			self.server.delete_value_in_store(msg_id,value)
+			self.server.delete_value_in_store(self.server.seq_number,value,self.server.vessel_id)
+			self.new_Thread(1,self.server.seq_number,value)
 	#Starts a new propagation thread
-	def new_Thread(self,action,key,value):
-		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, key, value) )
+	def new_Thread(self,action,value, seq):
+		post_content = urlencode({'action': action, 'seq': seq, 'value': value})
+		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, value, post_content) )
 		# We kill the process if we kill the server
 		thread.daemon = True
 		# We start the thread
