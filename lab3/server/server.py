@@ -17,6 +17,7 @@ from threading import  Thread # Thread Management
 from operator import itemgetter
 from ast import literal_eval as make_tuple
 import re
+import time
 #------------------------------------------------------------------------------------------------------
 
 # Global variables for HTML templates
@@ -40,65 +41,55 @@ class BlackboardServer(HTTPServer):
 	# We call the super init
 		HTTPServer.__init__(self,server_address, handler)
 		# we create the dictionary of values
+		# Contains: (value,origin_id,sequence)
 		self.store = []
 		# Short backlog of messages, for a post
+		# (action,(value,origin_id,sequence),origin_id,sequence)
+		# Where the second value contains the message, and the 3rd and 4th contains information about the sender/creator of the history.
 		self.history = {}
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 
-		self.seq_number = 0
+		self.seq_number = -1
 		# our own ID (IP is 10.1.0.ID)
 		self.vessel_id = vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
+		self.firstMsg = True
+		self.start = time.time()
+		self.end = time.time()
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, seq, value, origin_id):
-		self.seq_number += 1
+		if firstMsg:
+			start = time.time()
+
 		if self.seq_number < seq:
 			self.seq_number = seq
-		#if seq > self.seq_number:
-			#self.seq_number = seq
-			#self.insert_into_store(seq,value,origin_id)
-		#else:
-			#self.insert_into_store(self.seq_number,value,origin_id)
 
 		self.insert_into_store(seq,value,origin_id)
-
+		end = time.time()
 		pass
 
 	# This func will insert an item at its correct position
 	def insert_into_store(self, seq, value, origin_id):
-		self.store.append((value,origin_id,seq))
-		self.history[(origin_id,seq)] = (0,(value,origin_id,seq),origin_id,seq)
+		# If we have a history already
+		if (origin_id, seq) in self.history:
+			old = self.history[origin_id, seq]
+			# If it was an edit with lower origin_id or higher sequence
+			# If it was deleted we will not add a new one
+			if old[0] == 2 and (old[2] <= origin_id or old[3] > seq):
+				self.store.append(old[1])
+		else:
+			self.store.append((value,origin_id,seq))
+			self.history[(origin_id,seq)] = (0,(value,origin_id,seq),origin_id,seq)
 		self.sort_store()
 
 	def sort_store(self):
+		# Sort by sequence first then by origin_id
+		# (1,1)
+		# (2,1)
 		self.store.sort(key=itemgetter(2,1))
-		#for index,m in enumerate(self.store):
-			#if m[2] == current_key:
-				#if m[1] <= current_origin:
-					#self.store.insert(index,(current_value,current_origin,current_key))
-
-
-	def insert_into_store2(self, key,value, origin_id):
-		current_element = key
-		current_origin = origin_id
-		current_value = value
-		store = sorted(self.store.keys())
-		temp = (value,origin_id)
-		for index,m in enumerate(store):
-			if m == current_element:
-				tup = self.store[m]
-				if tup[1] < current_origin:
-					temp = self.store[m]
-					self.store[m] = (current_value,current_origin)
-					current_value = temp[0]
-					current_origin = temp[1]
-					current_element = store[index+1]
-				if self.current_key == m:
-					self.store[m+1] = temp
-					self.current_key = m + 1
 
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
@@ -106,13 +97,14 @@ class BlackboardServer(HTTPServer):
 		self.seq_number += 1
 		if self.seq_number < seq:
 			self.seq_number = seq
-		# we delete a value in the store if it exists
+
 		deleted = make_tuple(value)
 		print "delete:%d\t%s" % (seq,value)
+		# we delete a value in the store if it exists
 		if deleted in self.store:
 			index = self.store.index(deleted)
 			old = self.history[(deleted[1],deleted[2])]
-			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
+			if (old[3] == seq and old[2] >= origin_id) or old[3] < seq:
 				del self.store[index]
 				self.history[(deleted[1],deleted[2])] = (1,deleted,origin_id,seq)
 		else:
@@ -129,18 +121,19 @@ class BlackboardServer(HTTPServer):
 		items = [(o,s) for (v,o,s) in self.store]
 
 		new = make_tuple(value)
-		old = self.history[(new[1],new[2])]
-		if (new[1],new[2]) in items:
-			index = items.index((new[1],new[2]))
-			# Check if sequence number is higher and lower origin
-			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
-				self.store[index] = new
-				self.history[(new[1],new[2])] = (2,new,origin_id,seq)
+		# There must be a history if it exists
+		if (new[1],new[2]) in self.history:
+			old = self.history[(new[1],new[2])]
+			if (new[1],new[2]) in items:
+				index = items.index((new[1],new[2]))
+				# Check if sequence number is higher and lower origin
+				if (old[3] == seq and old[2] >= origin_id) or old[3] < seq:
+					self.store[index] = new
+					self.history[(new[1],new[2])] = (2,new,origin_id,seq)
 
-		elif old[0] == 1 and (old[3] == seq and old[2] >= origin_id or old[3] < seq):
-			self.store.append(new)
-			self.sort_store()
-
+			elif old[0] == 1 and (old[3] == seq and old[2] >= origin_id or old[3] < seq):
+				self.store.append(new)
+				self.sort_store()
 		else:
 			self.history[(new[1],new[2])] = (2,new,origin_id,seq)
 		pass
@@ -244,7 +237,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def make_Page(self):
 		entries = self.get_Entries()
 		header = board_frontpage_header_template
-		content = boardcontents_template %("Board Contents",entries)
+		content = boardcontents_template %(self.server.start,self.server.end,"Board Contents",entries)
 		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
 		page =  header + content + footer
 		self.wfile.write(page)
@@ -291,6 +284,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.server.modify_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
 	#Adds a new entry locally and then propagates it
 	def do_POST_New_Entry(self,data):
+		self.server.seq_number += 1
 		seq = self.server.seq_number
 		self.server.add_value_to_store(seq,data["entry"][0],self.server.vessel_id)
 		self.new_Thread(0,seq,data["entry"][0])
