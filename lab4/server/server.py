@@ -14,23 +14,15 @@ from httplib import HTTPConnection # Create a HTTP connection, as a client (for 
 from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
-from operator import itemgetter
-from ast import literal_eval as make_tuple
 import re
 #------------------------------------------------------------------------------------------------------
-
 # Global variables for HTML templates
-board_frontpage_footer_template = ""
-board_frontpage_header_template = ""
-boardcontents_template = ""
-entry_template = ""
+vote_frontpage_template = ""
+vote_result_template = ""
 
 #------------------------------------------------------------------------------------------------------
 port = 0
 #------------------------------------------------------------------------------------------------------
-
-
-
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -42,7 +34,7 @@ class BlackboardServer(HTTPServer):
 		# we create the dictionary of values
 		self.store = []
 		# Short backlog of messages, for a post
-		self.history = {}
+
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 
@@ -52,98 +44,20 @@ class BlackboardServer(HTTPServer):
 		# The list of other vessels
 		self.vessels = vessel_list
 #------------------------------------------------------------------------------------------------------
-	# We add a value received to the store
+    # We add a value received to the store
 	def add_value_to_store(self, seq, value, origin_id):
-		if self.seq_number < seq:
-			self.seq_number = seq
-		self.seq_number += 1
-		#if seq > self.seq_number:
-			#self.seq_number = seq
-			#self.insert_into_store(seq,value,origin_id)
-		#else:
-			#self.insert_into_store(self.seq_number,value,origin_id)
-
-		self.insert_into_store(seq,value,origin_id)
-
+		print "Hello"
 		pass
-
-	# This func will insert an item at its correct position
-	def insert_into_store(self, seq, value, origin_id):
-		self.store.append((value,origin_id,seq))
-		self.history[(origin_id,seq)] = (0,(value,origin_id,seq),origin_id,seq)
-		self.sort_store()
-
-	def sort_store(self):
-		self.store.sort(key=itemgetter(2,1))
-		#for index,m in enumerate(self.store):
-			#if m[2] == current_key:
-				#if m[1] <= current_origin:
-					#self.store.insert(index,(current_value,current_origin,current_key))
-
-
-	def insert_into_store2(self, key,value, origin_id):
-		current_element = key
-		current_origin = origin_id
-		current_value = value
-		store = sorted(self.store.keys())
-		temp = (value,origin_id)
-		for index,m in enumerate(store):
-			if m == current_element:
-				tup = self.store[m]
-				if tup[1] < current_origin:
-					temp = self.store[m]
-					self.store[m] = (current_value,current_origin)
-					current_value = temp[0]
-					current_origin = temp[1]
-					current_element = store[index+1]
-				if self.current_key == m:
-					self.store[m+1] = temp
-					self.current_key = m + 1
 
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,seq,value,origin_id):
-		if self.seq_number < seq:
-			self.seq_number = seq
-		self.seq_number += 1
-		# we delete a value in the store if it exists
-		deleted = make_tuple(value)
-		print "delete:%d\t%s" % (seq,value)
-		if deleted in self.store:
-			index = self.store.index(deleted)
-			old = self.history[(deleted[1],deleted[2])]
-			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
-				del self.store[index]
-				self.history[(deleted[1],deleted[2])] = (1,deleted,origin_id,seq)
-		else:
-			self.history[(origin_id,seq)] = (1,value)
+		print "Hello"
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
 	def modify_value_in_store(self,seq,value, origin_id):
-
-		if self.seq_number < seq:
-			self.seq_number = seq
-		self.seq_number += 1
-		# we modify a value in the store if it exists
-		print "change: %d\t%s" % (seq,value)
-		items = [(o,s) for (v,o,s) in self.store]
-
-		new = make_tuple(value)
-		old = self.history[(new[1],new[2])]
-		if (new[1],new[2]) in items:
-			index = items.index((new[1],new[2]))
-			# Check if sequence number is higher and lower origin
-			if old[3] == seq and old[2] >= origin_id or old[3] < seq:
-				self.store[index] = new
-				self.history[(new[1],new[2])] = (2,new,origin_id,seq)
-
-		elif old[0] == 1 and (old[3] == seq and old[2] >= origin_id or old[3] < seq):
-			self.store.append(new)
-			self.sort_store()
-
-		else:
-			self.history[(new[1],new[2])] = (2,new,origin_id,seq)
+		print "Hello"
 		pass
 
 #------------------------------------------------------------------------------------------------------
@@ -228,8 +142,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# Here, we should check which path was requested and call the right logic based on it
 		if self.path == "/":
 			self.do_GET_Index()
-		elif self.path == "/board":
-			self.do_GET_Board()
+		elif self.path == "/vote/results":
+			self.do_GET_Results()
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
 #------------------------------------------------------------------------------------------------------
@@ -238,76 +152,41 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.set_HTTP_headers(200)
 		self.make_Page()
 
-	def do_GET_Board(self):
+	def do_GET_Results(self):
 		self.set_HTTP_headers(200)
-		self.make_Page()
+		print "RESULTS!!"
 	#Constructs the html pages to be rendered
 	def make_Page(self):
-		entries = self.get_Entries()
-		header = board_frontpage_header_template
-		content = boardcontents_template %("Board Contents",entries)
-		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
-		page =  header + content + footer
-		self.wfile.write(page)
-
-	#Formats current entries into a string
-	def get_Entries(self):
-		entries = ""
-		for index,msg in enumerate(self.server.store):
-			entries += entry_template % ("board/%d"% index,index,msg)
-		return entries
+		frontpage = vote_frontpage_template
+		self.wfile.write(frontpage)
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
 
-		data = self.parse_POST_request()
-		print data
-		if self.path == "/board":
-			self.do_POST_New_Entry(data)
-		elif re.search(r'\d+',self.path):
-			self.do_POST_Edit(data)
-		elif self.path == "/propagate":
-			self.do_POST_Server(data)
+		if self.path == "/vote/attack":
+			self.do_POST_Attack()
+		elif self.path == "/vote/retreat":
+			self.do_POST_Retreat()
+		elif self.path == "/vote/byzantine":
+			self.do_POST_Byzantine()
+        #elif True #self.path == "/vote/byzantine":
+        #    self.do_POST_Byzantine()
 
 		self.set_HTTP_headers(200)
 
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
+	def do_POST_Attack(self):
+		print "Attack!"
 
-	#Handels propagation requests
-	def do_POST_Server(self,data):
-		v_id = int(self.client_address[0].split('.')[3])
-		#New entry
-		if data["action"][0] == '0':
-			#self.server.current_key = int(data["key"][0]) - 1
-			self.server.add_value_to_store(int(data["seq"][0]),data["value"][0],v_id)
-		#Delete entry
-		elif data["action"][0] == '1':
-			self.server.delete_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
-		#Edit entry
-		elif data["action"][0] == '2':
-			self.server.modify_value_in_store(int(data["seq"][0]),data["value"][0],v_id)
-	#Adds a new entry locally and then propagates it
-	def do_POST_New_Entry(self,data):
-		seq = self.server.seq_number
-		self.server.add_value_to_store(seq,data["entry"][0],self.server.vessel_id)
-		self.new_Thread(0,seq,data["entry"][0])
+	def do_POST_Retreat(self):
+		print "Retreat"
 
-	#Handels edits and deletes
-	def do_POST_Edit(self,data):
-		#Get the id of the entry
-		msg_id = int(self.path[7:])
-		value = data["entry"][0]
-		seq = self.server.seq_number
-		if data["delete"][0] == "0":
-			self.server.modify_value_in_store(seq,value,self.server.vessel_id)
-			self.new_Thread(2,seq,value)
-		else:
-			self.server.delete_value_in_store(seq,value,self.server.vessel_id)
-			self.new_Thread(1,seq,value)
+	def do_POST_Byzantine(self):
+		pass
 	#Starts a new propagation thread
 	def new_Thread(self,action, seq, value):
 		post_content = urlencode({'action': action, 'seq': seq, 'value': value})
@@ -324,10 +203,9 @@ if __name__ == '__main__':
 
 	## read the templates from the corresponding html files
 	#Loading from ./server/ since that is where mininet instances will load from
-	board_frontpage_footer_template = file("server/board_frontpage_footer_template.html").read()
-	board_frontpage_header_template = file("server/board_frontpage_header_template.html").read()
-	boardcontents_template = file("server/boardcontents_template.html").read()
-	entry_template = file("server/entry_template.html").read()
+	vote_frontpage_template = file("server/vote_frontpage_template.html").read()
+	vote_result_template = file("server/vote_result_template.html").read()
+
 
 	vessel_list = []
 	vessel_id = 0
