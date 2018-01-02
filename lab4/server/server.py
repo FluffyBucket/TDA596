@@ -15,6 +15,7 @@ from urllib import urlencode # Encode POST content into the HTTP header
 from codecs import open # Open a file
 from threading import  Thread # Thread Management
 import re
+import ast
 #------------------------------------------------------------------------------------------------------
 # Global variables for HTML templates
 vote_frontpage_template = ""
@@ -32,23 +33,27 @@ class BlackboardServer(HTTPServer):
 	# We call the super init
 		HTTPServer.__init__(self,server_address, handler)
 		# we create the dictionary of values
-		self.store = []
-		# Short backlog of messages, for a post
+		# this will contain a vote vector of each vessel
+		self.votes = {}
+		# Contains our profile e.g attack,retreat or byzantine
+		self.profile = -1
 
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 
-		self.seq_number = 0
 		# our own ID (IP is 10.1.0.ID)
 		self.vessel_id = vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
+
+		self.votes[vessel_id] = {}
 #------------------------------------------------------------------------------------------------------
     # We add a value received to the store
-	def add_value_to_store(self, seq, value, origin_id):
-		print "Hello"
-		pass
+	def add_vessel_vote(self, vote, vessel_id):
+		self.votes[self.vessel_id][vessel_id] = vote
 
+	def add_vessel_votes(self, votes, vessel_id):
+		self.votes[vessel_id] = votes
 #------------------------------------------------------------------------------------------------------
 	# We delete a value received from the store
 	def delete_value_in_store(self,seq,value,origin_id):
@@ -62,7 +67,7 @@ class BlackboardServer(HTTPServer):
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
-	def contact_vessel(self, vessel_ip, path, action, value,post_content):
+	def contact_vessel(self, vessel_ip, path, post_content):
 		# the Boolean variable we will return
 		success = False
 		# The variables must be encoded in the URL format, through urllib.urlencode
@@ -95,14 +100,14 @@ class BlackboardServer(HTTPServer):
 		return success
 #------------------------------------------------------------------------------------------------------
 	# We send a received value to all the other vessels of the system
-	def propagate_value_to_vessels(self, path, action, value, post_content):
+	def propagate_value_to_vessels(self, path, post_content):
 		# We iterate through the vessel list
 		for vessel in self.vessels:
 			# We should not send it to our own IP, or we would create an infinite loop of updates
 			if vessel != ("10.1.0.%s" % self.vessel_id):
 				# A good practice would be to try again if the request failed
 				# Here, we do it only once
-				self.contact_vessel(vessel, path, action, value, post_content)
+				self.contact_vessel(vessel, path, post_content)
 #------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------
@@ -142,7 +147,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# Here, we should check which path was requested and call the right logic based on it
 		if self.path == "/":
 			self.do_GET_Index()
-		elif self.path == "/vote/results":
+		elif self.path == "/vote/result":
 			self.do_GET_Results()
 #------------------------------------------------------------------------------------------------------
 # GET logic - specific path
@@ -154,7 +159,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 	def do_GET_Results(self):
 		self.set_HTTP_headers(200)
-		print "RESULTS!!"
+
+		result_page = vote_result_template % self.server.votes
+		self.wfile.write(result_page)
 	#Constructs the html pages to be rendered
 	def make_Page(self):
 		frontpage = vote_frontpage_template
@@ -164,15 +171,16 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
-
+		data = self.parse_POST_request()
+		print data
 		if self.path == "/vote/attack":
 			self.do_POST_Attack()
 		elif self.path == "/vote/retreat":
 			self.do_POST_Retreat()
 		elif self.path == "/vote/byzantine":
 			self.do_POST_Byzantine()
-        #elif True #self.path == "/vote/byzantine":
-        #    self.do_POST_Byzantine()
+		elif self.path == "/vote/result":
+			self.do_POST_Results(data)
 
 		self.set_HTTP_headers(200)
 
@@ -180,17 +188,35 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 # POST Logic
 #------------------------------------------------------------------------------------------------------
 	def do_POST_Attack(self):
+		self.set_vote(0)
 		print "Attack!"
 
 	def do_POST_Retreat(self):
+		self.set_vote(1)
 		print "Retreat"
 
 	def do_POST_Byzantine(self):
-		pass
+		self.set_vote(2)
+		print "Byzantine"
+
+	def set_vote(self,vote):
+		self.server.profile = vote
+		self.server.add_vessel_vote(vote,self.server.vessel_id)
+		self.new_Thread(0,vote)
+
+	def do_POST_Results(self,data):
+		v_id = int(self.client_address[0].split('.')[3])
+
+		if data["type"][0] == '0':
+			self.server.add_vessel_vote(data["value"],v_id)
+		else:
+			votes = ast.literal_eval(data["value"][0])
+			self.server.add_vessel_votes(votes,v_id)
+
 	#Starts a new propagation thread
-	def new_Thread(self,action, seq, value):
-		post_content = urlencode({'action': action, 'seq': seq, 'value': value})
-		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/propagate",action, value, post_content) )
+	def new_Thread(self, t, value):
+		post_content = urlencode({'type': t, 'value': value})
+		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/result", post_content) )
 		# We kill the process if we kill the server
 		thread.daemon = True
 		# We start the thread
