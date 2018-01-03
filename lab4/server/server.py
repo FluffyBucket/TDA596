@@ -185,7 +185,6 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def format_result(self):
 		result_page = ""
 		for v_id,votes in self.server.votes.items():
-			print votes
 			result_page += vote_result_template % (v_id,votes)
 		return result_page
 #------------------------------------------------------------------------------------------------------
@@ -194,7 +193,6 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_POST(self):
 		print("Receiving a POST on %s" % self.path)
 		data = self.parse_POST_request()
-		print data
 		if self.path == "/vote/attack":
 			self.do_POST_Attack()
 		elif self.path == "/vote/retreat":
@@ -232,9 +230,8 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.round_one_complete()
 
 	def round_one_complete(self):
-		print (len(self.server.byzantine))
-		print len(self.server.votes[self.server.vessel_id])
-		if (len(self.server.votes[self.server.vessel_id]) + len(self.server.byzantine)) == len(self.server.vessels):
+		num_byz = len(self.server.byzantine) if self.server.profile == 2 else 0
+		if (len(self.server.votes[self.server.vessel_id]) + num_byz) == len(self.server.vessels):
 			if self.server.profile == 2:
 				total = len(self.server.vessels)
 				num_loyal = total - len(self.server.byzantine)
@@ -271,7 +268,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		elif data["type"][0] == '1':
 			votes = ast.literal_eval(data["value"][0])
 			self.server.add_vessel_votes(votes,v_id)
-		elif data["type"][0] == '2' and self.server.profile == 2:
+		elif data["type"][0] == '2':
 			self.server.byzantine[v_id] = 1
 			self.round_one_complete()
 
