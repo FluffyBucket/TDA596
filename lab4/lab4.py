@@ -1,6 +1,6 @@
 # coding=utf-8
 #------------------------------------------------------------------------------------------------------
-# TDA596 - Lab 3
+# TDA596 - Lab 4
 # This script creates the distributed system, runs the simulation and launches the servers app
 # Contains two classes: Lab1Topology and Lab1
 # This script does not need any modification

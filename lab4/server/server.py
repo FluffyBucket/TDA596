@@ -16,6 +16,7 @@ from codecs import open # Open a file
 from threading import  Thread # Thread Management
 import re
 import ast
+import byzantine_behavior
 #------------------------------------------------------------------------------------------------------
 # Global variables for HTML templates
 vote_frontpage_template = ""
@@ -24,6 +25,8 @@ vote_result_template = ""
 #------------------------------------------------------------------------------------------------------
 port = 0
 #------------------------------------------------------------------------------------------------------
+#What to do on a tie
+ON_TIE = True
 
 #------------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------------
@@ -38,6 +41,8 @@ class BlackboardServer(HTTPServer):
 		# Contains our profile e.g attack,retreat or byzantine
 		self.profile = -1
 
+		# Keep a list of the byzantine nodes
+		self.byzantine = {}
 		# We keep a variable of the next id to insert
 		self.current_key = -1
 
@@ -51,6 +56,7 @@ class BlackboardServer(HTTPServer):
     # We add a value received to the store
 	def add_vessel_vote(self, vote, vessel_id):
 		self.votes[self.vessel_id][vessel_id] = vote
+
 
 	def add_vessel_votes(self, votes, vessel_id):
 		self.votes[vessel_id] = votes
@@ -78,7 +84,7 @@ class BlackboardServer(HTTPServer):
 		try:
 			# We contact vessel:PORT_NUMBER since we all use the same port
 			# We can set a timeout, after which the connection fails if nothing happened
-			connection = HTTPConnection("%s:%d" % (vessel_ip, port), timeout = 30)
+			connection = HTTPConnection("10.1.0.%s:%d" % (vessel_ip, port), timeout = 30)
 			# We only use POST to send data (PUT and DELETE not supported)
 			action_type = "POST"
 			# We send the HTTP request
@@ -104,7 +110,16 @@ class BlackboardServer(HTTPServer):
 		# We iterate through the vessel list
 		for vessel in self.vessels:
 			# We should not send it to our own IP, or we would create an infinite loop of updates
-			if vessel != ("10.1.0.%s" % self.vessel_id):
+			if vessel != self.vessel_id:
+				# A good practice would be to try again if the request failed
+				# Here, we do it only once
+				self.contact_vessel(vessel, path, post_content)
+
+	def propagate_value_to_loyals(self, path, post_content):
+		# We iterate through the vessel list
+		for vessel in self.vessels:
+			# We should not send it to our own IP, or we would create an infinite loop of updates
+			if vessel != self.vessel_id and vessel not in self.byzantine:
 				# A good practice would be to try again if the request failed
 				# Here, we do it only once
 				self.contact_vessel(vessel, path, post_content)
@@ -143,7 +158,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	# This function contains the logic executed when this server receives a GET request
 	# This function is called AUTOMATICALLY upon reception and is executed as a thread!
 	def do_GET(self):
-		print("Receiving a GET on path %s" % self.path)
+		#print("Receiving a GET on path %s" % self.path)
 		# Here, we should check which path was requested and call the right logic based on it
 		if self.path == "/":
 			self.do_GET_Index()
@@ -160,12 +175,19 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET_Results(self):
 		self.set_HTTP_headers(200)
 
-		result_page = vote_result_template % self.server.votes
+		result_page = self.format_result()
 		self.wfile.write(result_page)
 	#Constructs the html pages to be rendered
 	def make_Page(self):
 		frontpage = vote_frontpage_template
 		self.wfile.write(frontpage)
+
+	def format_result(self):
+		result_page = ""
+		for v_id,votes in self.server.votes.items():
+			print votes
+			result_page += vote_result_template % (v_id,votes)
+		return result_page
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
 #------------------------------------------------------------------------------------------------------
@@ -188,35 +210,84 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 # POST Logic
 #------------------------------------------------------------------------------------------------------
 	def do_POST_Attack(self):
-		self.set_vote(0)
+		self.set_vote(1)
 		print "Attack!"
 
 	def do_POST_Retreat(self):
-		self.set_vote(1)
+		self.set_vote(0)
 		print "Retreat"
 
 	def do_POST_Byzantine(self):
-		self.set_vote(2)
+		self.server.profile = 2
+		self.server.add_vessel_vote(2,self.server.vessel_id)
+		self.server.byzantine[self.server.vessel_id] = 1
+		self.new_Thread(2,2)
+		self.round_one_complete()
 		print "Byzantine"
 
 	def set_vote(self,vote):
 		self.server.profile = vote
 		self.server.add_vessel_vote(vote,self.server.vessel_id)
 		self.new_Thread(0,vote)
+		self.round_one_complete()
+
+	def round_one_complete(self):
+		print (len(self.server.byzantine))
+		print len(self.server.votes[self.server.vessel_id])
+		if (len(self.server.votes[self.server.vessel_id]) + len(self.server.byzantine)) == len(self.server.vessels):
+			if self.server.profile == 2:
+				total = len(self.server.vessels)
+				num_loyal = total - len(self.server.byzantine)
+
+				self.send_byz_votes(byzantine_behavior.compute_byzantine_vote_round1(num_loyal,total,ON_TIE))
+				self.send_byz_vectors(byzantine_behavior.compute_byzantine_vote_round2(num_loyal,total,ON_TIE))
+			else:
+				self.new_Thread(1,self.server.votes[self.server.vessel_id])
+
+	def send_byz_votes(self,data):
+		index = 0
+		for v_id in self.server.vessels:
+			if v_id not in self.server.byzantine:
+				self.send_to_vessel(v_id,0,int(data[index]))
+				index += 1
+
+	def send_byz_vectors(self,data):
+		index = 0
+
+		for v_id in self.server.vessels:
+			if v_id not in self.server.byzantine:
+				res = {}
+				for inner_i, vessel_vote in enumerate(data[index]):
+					res[inner_i + 1] = int(vessel_vote)
+				self.send_to_vessel(v_id,1,res)
+				index += 1
 
 	def do_POST_Results(self,data):
 		v_id = int(self.client_address[0].split('.')[3])
 
 		if data["type"][0] == '0':
-			self.server.add_vessel_vote(data["value"],v_id)
-		else:
+			self.server.add_vessel_vote(int(data["value"][0]),v_id)
+			self.round_one_complete()
+		elif data["type"][0] == '1':
 			votes = ast.literal_eval(data["value"][0])
 			self.server.add_vessel_votes(votes,v_id)
+		elif data["type"][0] == '2' and self.server.profile == 2:
+			self.server.byzantine[v_id] = 1
+			self.round_one_complete()
+
 
 	#Starts a new propagation thread
 	def new_Thread(self, t, value):
 		post_content = urlencode({'type': t, 'value': value})
 		thread = Thread(target=self.server.propagate_value_to_vessels,args=("/vote/result", post_content) )
+		# We kill the process if we kill the server
+		thread.daemon = True
+		# We start the thread
+		thread.start()
+
+	def send_to_vessel(self, vessel, t, votes):
+		post_content = urlencode({'type': t, 'value': votes})
+		thread = Thread(target=self.server.contact_vessel,args=(vessel,"/vote/result", post_content) )
 		# We kill the process if we kill the server
 		thread.daemon = True
 		# We start the thread
@@ -245,7 +316,7 @@ if __name__ == '__main__':
 		port = int(sys.argv[3])
 		# We need to write the other vessels IP, based on the knowledge of their number
 		for i in range(1, int(sys.argv[2])+1):
-			vessel_list.append("10.1.0.%d" % i) # We can add ourselves, we have a test in the propagation
+			vessel_list.append(i) # We can add ourselves, we have a test in the propagation
 
 	# We launch a server
 	server = BlackboardServer(('', port), BlackboardRequestHandler, vessel_id, vessel_list)
