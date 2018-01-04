@@ -174,8 +174,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 
 	def do_GET_Results(self):
 		self.set_HTTP_headers(200)
-
-		result_page = self.format_result()
+		result_page = "<pre>Voting Results ...</pre>"
+		if len(self.server.votes) == len(self.server.vessels):
+			result_page = self.format_result()
 		self.wfile.write(result_page)
 	#Constructs the html pages to be rendered
 	def make_Page(self):
@@ -183,9 +184,9 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.wfile.write(frontpage)
 
 	def format_result(self):
-		result_page = ""
-		for v_id,votes in self.server.votes.items():
-			result_page += vote_result_template % (v_id,votes)
+		result_vector = self.calc_result_vector()
+		result_page = "<h1>%s</h1>" % self.calc_result(result_vector)
+		result_page += vote_result_template % result_vector
 		return result_page
 #------------------------------------------------------------------------------------------------------
 # Request handling - POST
@@ -201,19 +202,25 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			self.do_POST_Byzantine()
 		elif self.path == "/vote/result":
 			self.do_POST_Results(data)
+		elif self.path == "/reset":
+			self.do_RESET()
 
 		self.set_HTTP_headers(200)
 
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
+	def do_RESET(self):
+		self.server.profile = -1
+		self.server.votes = {}
+		self.server.votes[self.server.vessel_id] = {}
+		self.byzantine = {}
+
 	def do_POST_Attack(self):
 		self.set_vote(1)
-		print "Attack!"
 
 	def do_POST_Retreat(self):
 		self.set_vote(0)
-		print "Retreat"
 
 	def do_POST_Byzantine(self):
 		self.server.profile = 2
@@ -221,7 +228,6 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.server.byzantine[self.server.vessel_id] = 1
 		self.new_Thread(2,2)
 		self.round_one_complete()
-		print "Byzantine"
 
 	def set_vote(self,vote):
 		self.server.profile = vote
@@ -240,6 +246,39 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 				self.send_byz_vectors(byzantine_behavior.compute_byzantine_vote_round2(num_loyal,total,ON_TIE))
 			else:
 				self.new_Thread(1,self.server.votes[self.server.vessel_id])
+
+	def calc_result_vector(self):
+		result_vector = []
+		for v_id in self.server.vessels:
+			attack = 0
+			retreat = 0
+			for vote in self.server.votes:
+				if self.server.votes[vote][v_id] == 1:
+					attack += 1
+				else:
+					retreat += 1
+			if attack > retreat:
+				result_vector.append(1)
+			elif attack < retreat:
+				result_vector.append(0)
+			else:
+				result_vector.append(-1)
+		return result_vector
+
+	def calc_result(self,result_vector):
+		attack = 0
+		retreat = 0
+		for vote in result_vector:
+			if vote == 1:
+				attack += 1
+			elif vote == 0:
+				retreat += 1
+		if attack > retreat:
+			return "ATTACK"
+		elif attack < retreat:
+			return "RETREAT"
+		else:
+			return "ATTACK"
 
 	def send_byz_votes(self,data):
 		index = 0
