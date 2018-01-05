@@ -61,23 +61,12 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, seq, value, origin_id):
-<<<<<<< HEAD
 		if self.firstMsg:
 			self.firstMsg = False
 			start = time.time()
 
 		if self.seq_number < seq:
 			self.seq_number = seq
-=======
-		if self.seq_number < seq:
-			self.seq_number = seq
-		self.seq_number += 1
-		#if seq > self.seq_number:
-			#self.seq_number = seq
-			#self.insert_into_store(seq,value,origin_id)
-		#else:
-			#self.insert_into_store(self.seq_number,value,origin_id)
->>>>>>> 709e9d7c5847221d7e160467641a2dbc5c3dfb79
 
 		self.insert_into_store(seq,value,origin_id)
 		self.end = time.time()
@@ -107,12 +96,7 @@ class BlackboardServer(HTTPServer):
 	def delete_value_in_store(self,seq,value,origin_id):
 		if self.seq_number < seq:
 			self.seq_number = seq
-<<<<<<< HEAD
 
-=======
-		self.seq_number += 1
-		# we delete a value in the store if it exists
->>>>>>> 709e9d7c5847221d7e160467641a2dbc5c3dfb79
 		deleted = make_tuple(value)
 		print "delete:%d\t%s" % (seq,value)
 		# we delete a value in the store if it exists
