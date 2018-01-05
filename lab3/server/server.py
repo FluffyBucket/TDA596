@@ -61,14 +61,15 @@ class BlackboardServer(HTTPServer):
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, seq, value, origin_id):
-		if firstMsg:
+		if self.firstMsg:
+			self.firstMsg = False
 			start = time.time()
 
 		if self.seq_number < seq:
 			self.seq_number = seq
 
 		self.insert_into_store(seq,value,origin_id)
-		end = time.time()
+		self.end = time.time()
 		pass
 
 	# This func will insert an item at its correct position
@@ -76,9 +77,8 @@ class BlackboardServer(HTTPServer):
 		# If we have a history already
 		if (origin_id, seq) in self.history:
 			old = self.history[origin_id, seq]
-			# If it was an edit with lower origin_id or higher sequence
-			# If it was deleted we will not add a new one
-			if old[0] == 2 and (old[2] <= origin_id or old[3] > seq):
+			# If it was an edit add that instead
+			if old[0] == 2:
 				self.store.append(old[1])
 		else:
 			self.store.append((value,origin_id,seq))
@@ -180,7 +180,14 @@ class BlackboardServer(HTTPServer):
 			if vessel != ("10.1.0.%s" % self.vessel_id):
 				# A good practice would be to try again if the request failed
 				# Here, we do it only once
-				self.contact_vessel(vessel, path, action, value, post_content)
+				retries = 0
+				while retries < 20:
+					if self.contact_vessel(vessel, path, action, value, post_content):
+						break
+					else:
+						retries += 1
+						time.sleep(1)
+
 #------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------
@@ -235,9 +242,10 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.make_Page()
 	#Constructs the html pages to be rendered
 	def make_Page(self):
+		tot_time = self.server.end - self.server.start
 		entries = self.get_Entries()
 		header = board_frontpage_header_template
-		content = boardcontents_template %(self.server.start,self.server.end,"Board Contents",entries)
+		content = boardcontents_template %(self.server.start,self.server.end,tot_time,"Board Contents",entries)
 		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
 		page =  header + content + footer
 		self.wfile.write(page)

@@ -28,11 +28,11 @@ entry_template = ""
 
 #------------------------------------------------------------------------------------------------------
 # How many times should we try to resend a message
-RETRY_COUNTS = 5
+RETRY_COUNTS = 20
 # How long should we wait before we try to resend a messege
-RETRY_WAIT_TIME = 0.1
+RETRY_WAIT_TIME = 1
 # Delay between contacting the leader
-LEADER_ALIVE_CHECK_TIME = 5
+LEADER_ALIVE_CHECK_TIME = 50
 #------------------------------------------------------------------------------------------------------
 # The port we should use, it is just instanciated to 0
 port = 0
@@ -55,18 +55,30 @@ class BlackboardServer(HTTPServer):
 		self.vessel_id = vessel_id
 		# The list of other vessels
 		self.vessels = vessel_list
+		self.firstMsg = True
+		self.start = time.time()
+		self.end = time.time()
+
+
 		# Decide leader
 		self.leader_id = -1
 		self.leader_value = random.randint(0,pow(len(self.vessels)+1,4))
 		self.vessels[self.vessel_id] = self.leader_value
+		self.start_leader = time.time()
+		self.end_leader = time.time()
 		self.leader_election()
 		self.check_leader()
+
 #------------------------------------------------------------------------------------------------------
 	# We add a value received to the store
 	def add_value_to_store(self, value):
+		if self.firstMsg:
+			self.firstMsg = False
+			self.start = time.time()
 		# We add the value to the store
 		self.current_key += 1
 		self.store[self.current_key] = value
+		self.end = time.time()
 		pass
 #------------------------------------------------------------------------------------------------------
 	# We modify a value received in the store
@@ -184,6 +196,7 @@ class BlackboardServer(HTTPServer):
 					elif self.vessels[vessel_id] == max_leader:
 						if self.leader_id < vessel_id:
 							self.leader_id = vessel_id
+			self.end_leader = time.time()
 			self.send_to_node("POST", neighbor,"/election",post_content)
 		else:
 			self.leader_id = self.vessel_id
@@ -286,15 +299,17 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 	def do_GET_NoLeader(self):
 		self.set_HTTP_headers(200)
 		header = board_frontpage_header_template
-		content = "<h1>No leader elected!</h1>" + boardcontents_template % (0,0,"Board Contents","")
+		content = "<h1>No leader elected!</h1>" + boardcontents_template % ("","",0,0,"Board Contents","")
 		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
 		page =  header + content + footer
 		self.wfile.write(page)
 	#Constructs the html pages to be rendered
 	def make_Page(self):
+		leader_time = self.server.end_leader - self.server.start_leader
+		tot_time = self.server.end - self.server.start + leader_time
 		entries = self.get_Entries()
 		header = board_frontpage_header_template
-		content = boardcontents_template %(self.server.leader_id,self.server.vessels[self.server.leader_id],"Board Contents",entries)
+		content = boardcontents_template %(leader_time,tot_time,self.server.leader_id,self.server.vessels[self.server.leader_id],"Board Contents",entries)
 		footer = board_frontpage_footer_template % "fremarl@student.chalmers.se"
 		page =  header + content + footer
 		self.wfile.write(page)
