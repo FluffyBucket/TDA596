@@ -57,19 +57,9 @@ class BlackboardServer(HTTPServer):
 	def add_vessel_vote(self, vote, vessel_id):
 		self.votes[self.vessel_id][vessel_id] = vote
 
-
+	# We add vote vector from vessel
 	def add_vessel_votes(self, votes, vessel_id):
 		self.votes[vessel_id] = votes
-#------------------------------------------------------------------------------------------------------
-	# We delete a value received from the store
-	def delete_value_in_store(self,seq,value,origin_id):
-		print "Hello"
-		pass
-#------------------------------------------------------------------------------------------------------
-	# We modify a value received in the store
-	def modify_value_in_store(self,seq,value, origin_id):
-		print "Hello"
-		pass
 
 #------------------------------------------------------------------------------------------------------
 # Contact a specific vessel with a set of variables to transmit to it
@@ -115,14 +105,6 @@ class BlackboardServer(HTTPServer):
 				# Here, we do it only once
 				self.contact_vessel(vessel, path, post_content)
 
-	def propagate_value_to_loyals(self, path, post_content):
-		# We iterate through the vessel list
-		for vessel in self.vessels:
-			# We should not send it to our own IP, or we would create an infinite loop of updates
-			if vessel != self.vessel_id and vessel not in self.byzantine:
-				# A good practice would be to try again if the request failed
-				# Here, we do it only once
-				self.contact_vessel(vessel, path, post_content)
 #------------------------------------------------------------------------------------------------------
 
 #------------------------------------------------------------------------------------------------------
@@ -172,6 +154,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.set_HTTP_headers(200)
 		self.make_Page()
 
+	# Return the results of the vote
 	def do_GET_Results(self):
 		self.set_HTTP_headers(200)
 		result_page = "<pre>Voting Results ...</pre>"
@@ -183,6 +166,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		frontpage = vote_frontpage_template
 		self.wfile.write(frontpage)
 
+	# Formats the vote results
 	def format_result(self):
 		result_vector = self.calc_result_vector()
 		result_page = "<h1>%s</h1>" % self.calc_result(result_vector)
@@ -210,18 +194,22 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 #------------------------------------------------------------------------------------------------------
 # POST Logic
 #------------------------------------------------------------------------------------------------------
+	# Resets everything to do a complete new try
 	def do_RESET(self):
 		self.server.profile = -1
-		self.server.votes = {}
+		self.server.votes.clear()
 		self.server.votes[self.server.vessel_id] = {}
-		self.byzantine = {}
+		self.server.byzantine.clear()
 
+	# Set the vessel to vote an honest attack
 	def do_POST_Attack(self):
 		self.set_vote(1)
 
+	# Set the vessel to vote an honest retreat
 	def do_POST_Retreat(self):
 		self.set_vote(0)
 
+	# Set vessel to be dishonest
 	def do_POST_Byzantine(self):
 		self.server.profile = 2
 		self.server.add_vessel_vote(2,self.server.vessel_id)
@@ -235,18 +223,22 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		self.new_Thread(0,vote)
 		self.round_one_complete()
 
+	# Does round 2 when round 1 is "complete"
 	def round_one_complete(self):
+		# Way to check if we have gathered everything if vessel is byzantine
 		num_byz = len(self.server.byzantine) if self.server.profile == 2 else 0
 		if (len(self.server.votes[self.server.vessel_id]) + num_byz) == len(self.server.vessels):
 			if self.server.profile == 2:
 				total = len(self.server.vessels)
 				num_loyal = total - len(self.server.byzantine)
-
+				# Send to all loyal nodes what we vote and then the result vectors
 				self.send_byz_votes(byzantine_behavior.compute_byzantine_vote_round1(num_loyal,total,ON_TIE))
 				self.send_byz_vectors(byzantine_behavior.compute_byzantine_vote_round2(num_loyal,total,ON_TIE))
 			else:
+				# Send our result vectors to everyone
 				self.new_Thread(1,self.server.votes[self.server.vessel_id])
 
+	# Calculates the result vector
 	def calc_result_vector(self):
 		result_vector = []
 		for v_id in self.server.vessels:
@@ -264,7 +256,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 			else:
 				result_vector.append(-1)
 		return result_vector
-
+	# Using the result vector we decide what to do
 	def calc_result(self,result_vector):
 		attack = 0
 		retreat = 0
@@ -278,18 +270,18 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		elif attack < retreat:
 			return "RETREAT"
 		else:
+			# On tie we attack
 			return "ATTACK"
-
+	# Send vote to every one that is not byzantine
 	def send_byz_votes(self,data):
 		index = 0
 		for v_id in self.server.vessels:
 			if v_id not in self.server.byzantine:
 				self.send_to_vessel(v_id,0,int(data[index]))
 				index += 1
-
+	# Send votes to every one that is not byzantine
 	def send_byz_vectors(self,data):
 		index = 0
-
 		for v_id in self.server.vessels:
 			if v_id not in self.server.byzantine:
 				res = {}
@@ -321,6 +313,7 @@ class BlackboardRequestHandler(BaseHTTPRequestHandler):
 		# We start the thread
 		thread.start()
 
+	# Sends to one vessel only
 	def send_to_vessel(self, vessel, t, votes):
 		post_content = urlencode({'type': t, 'value': votes})
 		thread = Thread(target=self.server.contact_vessel,args=(vessel,"/vote/result", post_content) )
@@ -338,7 +331,6 @@ if __name__ == '__main__':
 	#Loading from ./server/ since that is where mininet instances will load from
 	vote_frontpage_template = file("server/vote_frontpage_template.html").read()
 	vote_result_template = file("server/vote_result_template.html").read()
-
 
 	vessel_list = []
 	vessel_id = 0
